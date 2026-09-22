@@ -1026,3 +1026,51 @@ button.danger:hover:not(:disabled) {
   accent-color: var(--green);
 }
 
+/* нативный календарь (input[type=date]) в теме проекта */
+input[type="date"] {
+  color-scheme: dark;
+  background: var(--surface0);
+  color: var(--text);
+  border: 1px solid var(--surface1);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+}
+
+input[type="date"]:hover {
+  border-color: var(--surface2);
+  background: color-mix(in srgb, var(--surface0) 85%, black);
+}
+
+input[type="date"]:focus {
+  outline: none;
+  border-color: var(--mauve);
+}
+
+input[type="date"]::-webkit-datetime-edit {
+  color: var(--text);
+}
+
+input[type="date"]::-webkit-datetime-edit-text {
+  color: var(--subtext0);
+}
+
+input[type="date"]::-webkit-datetime-edit-day-field:focus,
+input[type="date"]::-webkit-datetime-edit-month-field:focus,
+input[type="date"]::-webkit-datetime-edit-year-field:focus {
+  background: var(--mauve);
+  color: var(--crust);
+  border-radius: 4px;
+  outline: none;
+}
+
+input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(0.9);
+  opacity: 0.6;
+  cursor: pointer;
+  transition: opacity 120ms ease;
+}
+
+input[type="date"]:hover::-webkit-calendar-picker-indicator {
+  opacity: 1;
+}
+

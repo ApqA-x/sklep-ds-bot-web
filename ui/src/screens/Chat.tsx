@@ -122,6 +122,9 @@ export default function Chat() {
   if (channels.isLoading) return <Loading />;
   if (channels.isError) return <ErrorBox error={channels.error} />;
 
+  // бэкенд отдаёт страницу хронологически; при «сначала новые» разворачиваем ленту
+  const feed = filters.sort === "desc" ? [...messages].reverse() : messages;
+
   return (
     <Section title="История чата">
       {available.length === 0 ? (
@@ -250,7 +253,7 @@ export default function Chat() {
             </>
           ) : (
             <div className="chat-list">
-              {messages.map((m) => (
+              {feed.map((m) => (
                 <div className="chat-message" key={m.messageId} data-deleted={m.deletedAt ? "true" : undefined}>
                   <span className="chat-time">{fmtDate(m.sentAt)}</span>
                   <strong className="chat-author" title={m.authorUserId}>

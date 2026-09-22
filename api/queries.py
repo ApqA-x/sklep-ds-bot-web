@@ -375,6 +375,19 @@ def settings_document(db: Any, guild_id: str) -> dict | None:
     return result
 
 
+def stalker_subscriptions(db: Any, guild_id: str) -> list[dict]:
+    docs = db["stalker_subscriptions"].find({"guildId": guild_id}, sort=[("createdAt", -1)])
+    return [
+        {
+            "id": str(doc.get("_id") or ""),
+            "watcherUserId": str(doc.get("watcherUserId") or ""),
+            "targetUserId": str(doc.get("targetUserId") or ""),
+            "createdAt": _iso(doc.get("createdAt")),
+        }
+        for doc in docs
+    ]
+
+
 def search_members(db: Any, guild_id: str, query: str, limit: int) -> list[dict]:
     cutoff = _utc_now() - ACTIVE_MEMBER_SEARCH_WINDOW
     rows = db[COLL_PARTICIPANTS].aggregate(build_member_search_pipeline(guild_id, query, cutoff, limit))

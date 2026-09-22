@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import {
   CartesianGrid,
@@ -10,7 +10,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { api } from "../api/client";
+import { api, useCanWrite } from "../api/client";
 import type { Period } from "../api/types";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
 import { discordUserUrl, fmtDate, fmtDuration } from "../lib/format";
@@ -19,6 +19,7 @@ const PERIODS: Period[] = ["7d", "30d", "all"];
 
 export default function UserProfile() {
   const { guildId = "", userId = "" } = useParams();
+  const canWrite = useCanWrite(guildId);
   const [period, setPeriod] = useState<Period>("30d");
   const query = useQuery({
     queryKey: ["user", guildId, userId, period],
@@ -116,6 +117,86 @@ export default function UserProfile() {
           ))}
         </div>
       </Section>
+      {canWrite && <ActionPanel guildId={guildId} userId={userId} />}
     </>
+  );
+}
+
+function ActionPanel({ guildId, userId }: { guildId: string; userId: string }) {
+  const [roleId, setRoleId] = useState("");
+  const [channelId, setChannelId] = useState("");
+  const [reason, setReason] = useState("");
+  const [notice, setNotice] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+
+  const run = useMutation({
+    mutationFn: async ({ kind }: { kind: string }) => {
+      switch (kind) {
+        case "grant":
+          return api.botRole(guildId, userId, roleId, "grant");
+        case "revoke":
+          return api.botRole(guildId, userId, roleId, "revoke");
+        case "mute":
+          return api.botTimeout(guildId, userId, true);
+        case "unmute":
+          return api.botTimeout(guildId, userId, false);
+        case "move":
+          return api.botMove(guildId, userId, channelId);
+        case "kick":
+          return api.botKick(guildId, userId, reason);
+        default:
+          throw new Error("unknown action");
+      }
+    },
+    onSuccess: (_data, vars) => {
+      setNotice(`выполнено: ${vars.kind}`);
+      queryClient.invalidateQueries({ queryKey: ["user", guildId, userId] });
+      queryClient.invalidateQueries({ queryKey: ["audit", guildId] });
+    },
+    onError: (err: Error) => setNotice(err.message),
+  });
+  const busy = run.isPending;
+  const isId = (v: string) => /^\d{5,25}$/.test(v);
+
+  return (
+    <Section title="Действия от имени бота">
+      {notice && <p className="hint">{notice}</p>}
+      <div className="actions-grid">
+        <div className="action">
+          <input value={roleId} onChange={(e) => setRoleId(e.target.value)} placeholder="role id" />
+          <button disabled={busy || !isId(roleId)} onClick={() => run.mutate({ kind: "grant" })}>
+            выдать роль
+          </button>
+          <button disabled={busy || !isId(roleId)} onClick={() => run.mutate({ kind: "revoke" })}>
+            снять роль
+          </button>
+        </div>
+        <div className="action">
+          <button disabled={busy} onClick={() => run.mutate({ kind: "mute" })}>
+            mute 10 мин
+          </button>
+          <button disabled={busy} onClick={() => run.mutate({ kind: "unmute" })}>
+            снять mute
+          </button>
+        </div>
+        <div className="action">
+          <input value={channelId} onChange={(e) => setChannelId(e.target.value)} placeholder="voice channel id" />
+          <button disabled={busy || !isId(channelId)} onClick={() => run.mutate({ kind: "move" })}>
+            переместить
+          </button>
+        </div>
+        <div className="action">
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="причина кика" />
+          <button
+            disabled={busy || reason.trim().length === 0}
+            onClick={() => {
+              if (window.confirm(`Кикнуть пользователя ${userId}?`)) run.mutate({ kind: "kick" });
+            }}
+          >
+            кикнуть
+          </button>
+        </div>
+      </div>
+    </Section>
   );
 }

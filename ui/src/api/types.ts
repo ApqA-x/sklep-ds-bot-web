@@ -146,6 +146,31 @@ export type GuildSettingsDoc = Record<string, unknown> & { guildId: string };
 
 export type MemberHit = { userId: string; userName: string };
 
+export type StalkerSubscription = {
+  id: string;
+  watcherUserId: string;
+  targetUserId: string;
+  createdAt: string;
+};
+
+export type AuditItem = {
+  actorUserId: string;
+  actorName: string;
+  action: string;
+  before: unknown;
+  after: unknown;
+  ok: boolean;
+  at: string;
+};
+
+export type AuditPage = {
+  guildId: string;
+  page: number;
+  size: number;
+  total: number;
+  items: AuditItem[];
+};
+
 export type GuildAccess = {
   guildId: string;
   name: string;

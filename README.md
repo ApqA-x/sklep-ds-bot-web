@@ -81,10 +81,21 @@ workflow `publish.yml` соберёт `ghcr.io/apqa-x/sklep-ds-bot-web:0.1.0` (+
 | Этап | Статус |
 |---|---|
 | 0. Каркас | ✅ |
-| 1. Read API | ✅ текущий (`api/queries.py`, `api/read.py`, web-индексы `web_*` при старте) |
-| 2. SPA v1 | ⬜ |
-| 3. OAuth + права | ⬜ |
-| 4. Write-слой | ⬜ |
-| 5. Discord-действия | ⬜ |
-| 6. UI управления | ⬜ |
-| 7. Прод | ⬜ |
+| 1. Read API | ✅ (`api/queries.py`, `api/read.py`, web-индексы `web_*` при старте) |
+| 2. SPA v1 | ✅ (роутинг, Leaderboard/Active/Sessions/User/Invites, recharts) |
+| 3. OAuth + права | ✅ (`api/auth.py`, `api/discord_api.py`, read-гейт Manage Guild, dev-mode без env) |
+| 4. Write-слой | ✅ (`api/models.py`, `api/mutations.py`, `api/write.py`, `web_audit_logs`, конфликт `expectedUpdatedAt`) |
+| 5. Discord-действия | ✅ (`api/bot.py`: роли/timeout/move/kick/сообщение/инвайты, rate-limit, audit) |
+| 6. UI управления | ✅ (форма настроек, списки trusted/autoUnmute/stalker, панель действий, страница аудита) |
+| 7. Прод | ⬜ требуется на хосте: OAuth env, reverse proxy, `docker stack deploy` (чеклист ниже) |
+
+## Чеклист прода-выката (этап 7, выполняется на Swarm-хосте)
+
+1. Discord Developer Portal: у приложения включить OAuth2, redirect URI `https://<домен>/api/auth/callback`, скопировать client id/secret.
+2. В `bot/.env` добавить: `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`, `WEB_SESSION_SECRET` (32+ случайных байт, например `openssl rand -hex 32`), `WEB_PUBLIC_URL`.
+3. Запушить тег образа и заменить `:latest` на `v*` в `bot/docker-stack.yaml`: `image: ghcr.io/apqa-x/sklep-ds-bot-web:v0.1.0`.
+4. Reverse proxy (Caddy/nginx/Traefik): TLS для `<домен>` → `web:8000` (сеть оверлея). Наружу публикация порта **не** нужна.
+5. `docker stack deploy -c docker-stack.yaml bot`.
+6. Проверка: `curl https://<домен>/api/healthz` → `status: ok`; вход через Discord; сервер виден только если пользователь в нём и имеет Manage Guild.
+
+Пока `DISCORD_CLIENT_*`/`WEB_SESSION_SECRET` не заданы, сайт работает в dev-режиме (без авторизации) — в проде не публиковать порт наружу до шага 2.

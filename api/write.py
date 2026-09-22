@@ -5,7 +5,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from . import mutations
+from . import mutations, queries
 from .auth import actor_of, require_guild_admin
 from .models import GuildSettingsPatch, ListMemberAction, StalkerAction
 
@@ -64,6 +64,12 @@ def mutate_auto_unmute(request: Request, guildId: str, body: ListMemberAction) -
 def mutate_stalker(request: Request, guildId: str, body: StalkerAction) -> dict:
     guild = _guild(guildId)
     return mutations.mutate_stalker(_db(request), guild, body, actor_of(request))
+
+
+@router.get("/stalker")
+def list_stalker(request: Request, guildId: str) -> dict:
+    guild = _guild(guildId)
+    return {"guildId": guild, "items": queries.stalker_subscriptions(_db(request), guild)}
 
 
 @router.get("/audit")

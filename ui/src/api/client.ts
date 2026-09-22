@@ -1,5 +1,7 @@
+import { useQuery } from "@tanstack/react-query";
 import type {
   ActiveSession,
+  AuditPage,
   GuildAccess,
   GuildSettingsDoc,
   Health,
@@ -9,6 +11,7 @@ import type {
   Period,
   SessionDetail,
   SessionPage,
+  StalkerSubscription,
   UserProfile,
   Whoami,
 } from "./types";
@@ -28,6 +31,26 @@ async function apiGet<T>(path: string): Promise<T> {
     try {
       const body = (await response.json()) as { detail?: string };
       if (body.detail) detail = body.detail;
+    } catch {
+      /* not JSON */
+    }
+    throw new ApiError(response.status, detail);
+  }
+  return (await response.json()) as T;
+}
+
+async function apiSend<T>(method: "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
+  const response = await fetch(path, {
+    method,
+    credentials: "same-origin",
+    headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      if (payload.detail) detail = typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
     } catch {
       /* not JSON */
     }
@@ -71,4 +94,55 @@ export const api = {
     apiGet<{ guildId: string; q: string; items: MemberHit[] }>(
       `/api/guild/${guildId}/members?q=${encodeURIComponent(q)}`,
     ),
+
+  patchSettings: (guildId: string, patch: Record<string, unknown>) =>
+    apiSend<GuildSettingsDoc>("PATCH", `/api/guild/${guildId}/settings`, patch),
+
+  trusted: (guildId: string, userId: string, action: "add" | "remove") =>
+    apiSend<GuildSettingsDoc>("POST", `/api/guild/${guildId}/trusted`, { userId, action }),
+
+  autoUnmute: (guildId: string, userId: string, action: "add" | "remove") =>
+    apiSend<GuildSettingsDoc>("POST", `/api/guild/${guildId}/autoUnmute`, { userId, action }),
+
+  stalkerList: (guildId: string) =>
+    apiGet<{ guildId: string; items: StalkerSubscription[] }>(`/api/guild/${guildId}/stalker`),
+
+  stalker: (guildId: string, watcherUserId: string, targetUserId: string, action: "add" | "remove") =>
+    apiSend<{ ok: boolean; subscriptionId: string }>("POST", `/api/guild/${guildId}/stalker`, {
+      watcherUserId,
+      targetUserId,
+      action,
+    }),
+
+  audit: (guildId: string, page = 1, size = 50) =>
+    apiGet<AuditPage>(`/api/guild/${guildId}/audit?page=${page}&size=${size}`),
+
+  botRole: (guildId: string, userId: string, roleId: string, action: "grant" | "revoke") =>
+    apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/member/${userId}/roles`, { roleId, action }),
+
+  botTimeout: (guildId: string, userId: string, mute: boolean, seconds = 600) =>
+    apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/member/${userId}/timeout`, { mute, seconds }),
+
+  botMove: (guildId: string, userId: string, channelId: string) =>
+    apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/member/${userId}/move`, { channelId }),
+
+  botKick: (guildId: string, userId: string, reason: string) =>
+    apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/member/${userId}/kick`, { reason }),
+
+  botMessage: (guildId: string, channelId: string, content: string) =>
+    apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/channel/${channelId}/message`, { content }),
+
+  botInviteCreate: (guildId: string, channelId: string) =>
+    apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/invite`, { channelId }),
+
+  botInviteDelete: (guildId: string, code: string) =>
+    apiSend<{ ok: boolean }>("DELETE", `/api/guild/${guildId}/bot/invite/${encodeURIComponent(code)}`),
 };
+
+export function useCanWrite(guildId: string | undefined): boolean {
+  const whoami = useQuery({ queryKey: ["whoami"], queryFn: api.whoami });
+  const me = whoami.data;
+  if (!me) return false;
+  if (!me.authEnabled) return true; // dev mode
+  return me.access.some((a) => a.guildId === guildId && a.canWrite);
+}

@@ -259,3 +259,77 @@ pre.inline {
   width: 100%;
   text-align: left;
 }
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.field span {
+  min-width: 210px;
+  color: var(--muted);
+}
+
+.field input,
+.field select {
+  flex: 1;
+}
+
+.check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-right: 1rem;
+}
+
+.events-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+}
+
+.idlist {
+  margin-bottom: 0.9rem;
+}
+
+.idlist-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.4rem;
+}
+
+.idlist-head form {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.chip button {
+  border: none;
+  background: none;
+  color: inherit;
+  padding: 0 0.2rem;
+  margin-left: 0.3rem;
+}
+
+.actions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 0.6rem;
+}
+
+.action {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+}
+
+.action input {
+  flex: 1;
+  min-width: 120px;
+}

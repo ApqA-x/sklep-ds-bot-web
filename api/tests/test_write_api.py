@@ -127,6 +127,9 @@ def test_stalker_add_and_remove() -> None:
     sub_id = f"{GUILD}:{watcher}:{USER}"
     assert add.json()["subscriptionId"] == sub_id
     assert db[COLL_STALKER].docs[0]["_id"] == sub_id
+    listing = client.get(f"/api/guild/{GUILD}/stalker")
+    assert listing.status_code == 200
+    assert listing.json()["items"][0]["watcherUserId"] == watcher
     remove = client.post(
         f"/api/guild/{GUILD}/stalker",
         json={"watcherUserId": watcher, "targetUserId": USER, "action": "remove"},

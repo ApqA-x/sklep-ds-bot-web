@@ -52,11 +52,12 @@ def get_leaderboard(
     guildId: str,
     period: str = Query("30d"),
     limit: int = Query(50, ge=1, le=100),
+    page: int = Query(1, ge=1, le=200),
 ) -> dict:
     guild = _snowflake(guildId, "guildId")
     _period(period)
-    items, cached = queries.leaderboard(_db(request), guild, period, limit)
-    return {"guildId": guild, "period": period, "limit": limit, "cached": cached, "items": items}
+    items, total, cached = queries.leaderboard(_db(request), guild, period, limit, page)
+    return {"guildId": guild, "period": period, "limit": limit, "page": page, "total": total, "cached": cached, "items": items}
 
 
 @router.get("/sessions/active")
@@ -170,20 +171,50 @@ def chat_channels(request: Request, guildId: str) -> dict:
 def chat_messages(
     request: Request,
     guildId: str,
-    channelId: str = Query(...),
+    channelId: str = Query(""),
     before: str = Query(""),
+    after: str = Query(""),
     limit: int = Query(50, ge=1, le=200),
+    userId: str = Query(""),
+    type: str = Query("", pattern="^(||text|link|file|image)$"),
+    dateFrom: str = Query(""),
+    dateTo: str = Query(""),
+    sort: str = Query("desc", pattern="^(asc|desc)$"),
 ) -> dict:
     guild = _snowflake(guildId, "guildId")
-    _snowflake(channelId, "channelId")
-    before_dt = None
-    if before:
+    if channelId:
+        _snowflake(channelId, "channelId")
+    if userId:
+        _snowflake(userId, "userId")
+
+    def _iso_dt(value: str, field: str) -> datetime | None:
+        if not value:
+            return None
         try:
-            parsed = datetime.fromisoformat(before.replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
         except ValueError:
-            raise HTTPException(status_code=422, detail="before must be an ISO datetime") from None
-        before_dt = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-    return queries.chat_messages(_db(request), guild, channelId, before_dt, limit)
+            raise HTTPException(status_code=422, detail=f"{field} must be an ISO datetime") from None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+    def _bound(value: str, *, end: bool) -> datetime | None:
+        try:
+            return queries.parse_date_bound(value, end=end)
+        except queries.InvalidDate:
+            raise HTTPException(status_code=422, detail="invalid date") from None
+
+    return queries.chat_messages(
+        _db(request),
+        guild,
+        channelId or None,
+        _iso_dt(before, "before"),
+        limit,
+        after=_iso_dt(after, "after"),
+        user_id=userId or None,
+        msg_type=type or None,
+        date_from=_bound(dateFrom, end=False),
+        date_to=_bound(dateTo, end=True),
+        sort=sort,
+    )
 
 
 @router.get("/picker")

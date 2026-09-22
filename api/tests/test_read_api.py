@@ -41,14 +41,19 @@ def test_leaderboard_endpoint() -> None:
     db = FakeDB()
     db[queries.COLL_PARTICIPANTS] = FakeCollection(
         queries.COLL_PARTICIPANTS,
-        aggregate_results=[[{"_id": "5", "userName": "U", "totalMs": 42, "appearances": 1}]],
+        aggregate_results=[[{"page": [{"_id": "5", "userName": "U", "totalMs": 42, "appearances": 1}], "total": [{"n": 137}]}]],
     )
     client = _client(db)
-    response = client.get(f"/api/guild/{GUILD}/leaderboard", params={"period": "7d", "limit": 10})
+    response = client.get(f"/api/guild/{GUILD}/leaderboard", params={"period": "7d", "limit": 10, "page": 2})
     assert response.status_code == 200
     body = response.json()
     assert body["guildId"] == GUILD
+    assert body["page"] == 2
+    assert body["total"] == 137
     assert body["items"] == [{"userId": "5", "userName": "U", "totalMs": 42, "appearances": 1}]
+    # skip пошёл в pipeline: страница 2 при limit=10 → $skip 10
+    pipeline = db[queries.COLL_PARTICIPANTS].calls[0][2]
+    assert pipeline[-1]["$facet"]["page"] == [{"$skip": 10}, {"$limit": 10}]
 
 
 def test_leaderboard_validation() -> None:
@@ -373,8 +378,104 @@ def test_chat_messages_pagination_and_chronological_order() -> None:
 def test_chat_endpoint_validation() -> None:
     client = _client(FakeDB())
     assert client.get(f"/api/guild/{GUILD}/chat", params={"channelId": "bad"}).status_code == 422
-    assert client.get(f"/api/guild/{GUILD}/chat").status_code == 422  # channelId обязателен
+    assert client.get(f"/api/guild/{GUILD}/chat", params={"type": "sticker"}).status_code == 422
+    assert client.get(f"/api/guild/{GUILD}/chat", params={"sort": "sideways"}).status_code == 422
     assert (
         client.get(f"/api/guild/{GUILD}/chat", params={"channelId": "140000000000000000", "before": "oops"}).status_code
         == 422
     )
+
+
+def _chat_filter_db() -> FakeDB:
+    db = FakeDB()
+    ch1, ch2 = "140000000000000000", "140000000000000001"
+    user_b = "160000000000000002"
+    db[queries.COLL_CHAT] = FakeCollection(
+        queries.COLL_CHAT,
+        docs=[
+            {
+                "_id": "a",
+                "guildId": GUILD,
+                "channelId": ch1,
+                "messageId": "a",
+                "authorUserId": USER,
+                "authorName": "alice",
+                "content": "привет",
+                "sentAt": _dt(1).replace(hour=1),
+            },
+            {
+                "_id": "b",
+                "guildId": GUILD,
+                "channelId": ch1,
+                "messageId": "b",
+                "authorUserId": user_b,
+                "authorName": "bob",
+                "content": "смотри ссылку https://example.com/x",
+                "sentAt": _dt(2).replace(hour=1),
+            },
+            {
+                "_id": "c",
+                "guildId": GUILD,
+                "channelId": ch2,
+                "messageId": "c",
+                "authorUserId": USER,
+                "authorName": "alice",
+                "content": "",
+                "sentAt": _dt(3).replace(hour=1),
+                "attachments": [
+                    {"id": "1", "filename": "cat.png", "contentType": "image/png", "size": 10, "kind": "image", "path": "g/2026-09/aa.png", "stored": True, "url": ""}
+                ],
+            },
+            {
+                "_id": "d",
+                "guildId": GUILD,
+                "channelId": ch2,
+                "messageId": "d",
+                "authorUserId": user_b,
+                "authorName": "bob",
+                "content": "архив",
+                "sentAt": _dt(4).replace(hour=1),
+                "attachments": [
+                    {"id": "2", "filename": ".zip", "contentType": "application/zip", "size": 20, "kind": "file", "path": "", "stored": False, "url": "https://cdn.discord/2.zip"}
+                ],
+            },
+        ],
+    )
+    return db
+
+
+def test_chat_filters_type_user_date_sort_all_channels() -> None:
+    client = _client(_chat_filter_db())
+
+    # без channelId — все каналы; лента всегда хронологически
+    all_msgs = client.get(f"/api/guild/{GUILD}/chat").json()
+    assert [item["messageId"] for item in all_msgs["items"]] == ["a", "b", "c", "d"]
+
+    images = client.get(f"/api/guild/{GUILD}/chat", params={"type": "image"}).json()
+    assert [item["messageId"] for item in images["items"]] == ["c"]
+    assert images["items"][0]["attachments"][0]["path"] == "g/2026-09/aa.png"
+
+    files = client.get(f"/api/guild/{GUILD}/chat", params={"type": "file"}).json()
+    assert {item["messageId"] for item in files["items"]} == {"c", "d"}  # в т.ч. картинки — attachments непустой
+
+    links = client.get(f"/api/guild/{GUILD}/chat", params={"type": "link"}).json()
+    assert [item["messageId"] for item in links["items"]] == ["b"]
+
+    texts = client.get(f"/api/guild/{GUILD}/chat", params={"type": "text"}).json()
+    assert [item["messageId"] for item in texts["items"]] == ["a"]
+
+    by_user = client.get(f"/api/guild/{GUILD}/chat", params={"userId": "160000000000000002"}).json()
+    assert {item["messageId"] for item in by_user["items"]} == {"b", "d"}
+
+    ranged = client.get(
+        f"/api/guild/{GUILD}/chat", params={"dateFrom": "2026-09-02", "dateTo": "2026-09-03"}
+    ).json()
+    assert {item["messageId"] for item in ranged["items"]} == {"b", "c"}
+
+    asc = client.get(f"/api/guild/{GUILD}/chat", params={"sort": "asc", "limit": 2}).json()
+    assert [item["messageId"] for item in asc["items"]] == ["a", "b"]
+    assert asc["hasMore"] is True
+    newer = client.get(
+        f"/api/guild/{GUILD}/chat", params={"sort": "asc", "limit": 2, "after": asc["nextAfter"]}
+    ).json()
+    assert [item["messageId"] for item in newer["items"]] == ["c", "d"]

@@ -1,34 +1,93 @@
 from __future__ import annotations
 
+import re
 from typing import Any
+
+
+def _resolve(doc: dict, key: str) -> Any:
+    """Доступ по точечному ключу (after.userId) как в Mongo; через массивы — список кандидатов."""
+    current: Any = [doc]
+    for part in key.split("."):
+        nxt: list[Any] = []
+        for item in current:
+            if isinstance(item, dict):
+                nxt.append(item.get(part))
+            elif isinstance(item, list):
+                # Mongo: путь по индексу или «любой элемент» массива
+                if part.isdigit():
+                    idx = int(part)
+                    nxt.append(item[idx] if idx < len(item) else None)
+                else:
+                    nxt.extend(el.get(part, None) if isinstance(el, dict) else None for el in item)
+        current = nxt
+    if len(current) == 1:
+        return current[0]
+    return current if current else None
+
+
+def _match_one(value: Any, cond: Any) -> bool:
+    if isinstance(cond, dict):
+        for op, want in cond.items():
+            if op == "$gte":
+                if value is None or value < want:
+                    return False
+            elif op == "$lt":
+                if value is None or value >= want:
+                    return False
+            elif op == "$lte":
+                if value is None or value > want:
+                    return False
+            elif op == "$gt":
+                if value is None or value <= want:
+                    return False
+            elif op == "$in":
+                if value not in want:
+                    return False
+            elif op == "$nin":
+                if value in want:
+                    return False
+            elif op == "$ne":
+                if value == want:
+                    return False
+            elif op == "$exists":
+                if (value is not None) != bool(want):
+                    return False
+            elif op == "$regex":
+                if value is None or not re.search(want, str(value)):
+                    return False
+            elif op == "$not":
+                if _match_condition(value, want):
+                    return False
+            elif op == "$options":
+                continue
+            else:
+                raise AssertionError(f"FakeCollection: unsupported op {op}")
+        return True
+    return value == cond
+
+
+def _match_condition(value: Any, cond: Any) -> bool:
+    if isinstance(value, list) and not (isinstance(cond, dict) and cond.get("$in") is not None):
+        # несколько кандидатов из массива: достаточно совпадения одного (семантика Mongo)
+        return any(_match_one(v, cond) for v in value) or _match_one(value, cond)
+    return _match_one(value, cond)
 
 
 def _matches(doc: dict, flt: dict | None) -> bool:
     if not flt:
         return True
     for key, cond in flt.items():
-        value = doc.get(key)
-        if isinstance(cond, dict):
-            for op, want in cond.items():
-                if op == "$gte":
-                    if value is None or value < want:
-                        return False
-                elif op == "$lt":
-                    if value is None or value >= want:
-                        return False
-                elif op == "$lte":
-                    if value is None or value > want:
-                        return False
-                elif op == "$in":
-                    if value not in want:
-                        return False
-                elif op == "$ne":
-                    if value == want:
-                        return False
-                else:
-                    raise AssertionError(f"FakeCollection: unsupported op {op}")
+        if key == "$and":
+            if not all(_matches(doc, sub) for sub in cond):
+                return False
+        elif key == "$or":
+            if not any(_matches(doc, sub) for sub in cond):
+                return False
+        elif key == "$nor":
+            if any(_matches(doc, sub) for sub in cond):
+                return False
         else:
-            if value != cond:
+            if not _match_condition(_resolve(doc, key), cond):
                 return False
     return True
 

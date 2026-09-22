@@ -37,3 +37,15 @@ export function fmtDay(iso: string): string {
 export function discordUserUrl(userId: string): string {
   return `https://discord.com/users/${userId}`;
 }
+
+export function fmtBytes(size: number): string {
+  if (!Number.isFinite(size) || size <= 0) return "0 Б";
+  const units = ["Б", "КБ", "МБ", "ГБ"];
+  let value = size;
+  let i = 0;
+  while (value >= 1024 && i < units.length - 1) {
+    value /= 1024;
+    i += 1;
+  }
+  return `${value >= 10 || i === 0 ? Math.round(value) : value.toFixed(1)} ${units[i]}`;
+}

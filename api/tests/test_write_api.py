@@ -212,6 +212,99 @@ def test_audit_origin_filter() -> None:
     assert client.get(f"/api/guild/{GUILD}/audit", params={"origin": "bogus"}).status_code == 422
 
 
+def _audit_fixture_db() -> FakeDB:
+    db = _settings_db()
+    target_a = "160000000000000009"
+    target_b = "160000000000000008"
+
+    def row(action: str, at: datetime, *, after, ok: bool = True, origin: str = "web") -> dict:
+        return {
+            "guildId": GUILD,
+            "actorUserId": USER,
+            "actorName": "mod",
+            "action": action,
+            "before": None,
+            "after": after,
+            "ok": ok,
+            "origin": origin,
+            "at": at,
+        }
+
+    db[COLL_AUDIT] = FakeCollection(
+        COLL_AUDIT,
+        docs=[
+            row("bot.timeout", datetime(2026, 9, 1, 10, tzinfo=timezone.utc), after={"userId": target_a, "mute": True, "seconds": 600}),
+            row("bot.move", datetime(2026, 9, 5, 10, tzinfo=timezone.utc), after={"userId": target_b, "channelId": "999"}, ok=False),
+            row("stalker.add", datetime(2026, 9, 9, 10, tzinfo=timezone.utc), after={"subscriptionId": f"{GUILD}:{USER}:{target_a}"}),
+            row("settings.patch", datetime(2026, 9, 20, 10, tzinfo=timezone.utc), after={"summaryChannelId": "555"}, origin="discord"),
+        ],
+        # FakeCollection.aggregate игнорирует pipeline — выдаём заранее подготовленный ответ $group
+        aggregate_results=[
+            [
+                {"_id": "bot.timeout", "n": 1},
+                {"_id": "bot.move", "n": 1},
+                {"_id": "stalker.add", "n": 1},
+                {"_id": "settings.patch", "n": 1},
+            ]
+        ],
+    )
+    return db
+
+
+def test_audit_filters_target_action_ok_date_sort() -> None:
+    client = _dev_client(_audit_fixture_db())
+    target_a = "160000000000000009"
+
+    # «над кем»: after.userId ИЛИ target внутри stalker subscriptionId
+    over_a = client.get(f"/api/guild/{GUILD}/audit", params={"userId": target_a}).json()
+    assert {item["action"] for item in over_a["items"]} == {"bot.timeout", "stalker.add"}
+
+    # фильтр по типу действия
+    only_timeout = client.get(f"/api/guild/{GUILD}/audit", params={"action": "bot.timeout"}).json()
+    assert only_timeout["total"] == 1
+    assert only_timeout["items"][0]["action"] == "bot.timeout"
+
+    # фильтр по итогу: только ошибки
+    errors = client.get(f"/api/guild/{GUILD}/audit", params={"ok": "0"}).json()
+    assert errors["total"] == 1
+    assert errors["items"][0]["action"] == "bot.move"
+
+    # диапазон дат: окно только вокруг bot.move (05 сен)
+    ranged = client.get(
+        f"/api/guild/{GUILD}/audit", params={"dateFrom": "2026-09-04", "dateTo": "2026-09-06"}
+    ).json()
+    assert [item["action"] for item in ranged["items"]] == ["bot.move"]
+
+    # сортировка по возрастанию даты
+    asc = client.get(f"/api/guild/{GUILD}/audit", params={"sort": "asc"}).json()
+    assert [item["action"] for item in asc["items"]] == [
+        "bot.timeout",
+        "bot.move",
+        "stalker.add",
+        "settings.patch",
+    ]
+
+    # комбинирование фильтров: origin=discord + успешные → пусто (discord-запись ok, но origin другой у ошибок)
+    combo = client.get(f"/api/guild/{GUILD}/audit", params={"origin": "discord", "ok": "0"}).json()
+    assert combo["total"] == 0
+
+    assert client.get(f"/api/guild/{GUILD}/audit", params={"userId": "bad"}).status_code == 422
+    assert client.get(f"/api/guild/{GUILD}/audit", params={"sort": "sideways"}).status_code == 422
+    assert client.get(f"/api/guild/{GUILD}/audit", params={"dateFrom": "not-a-date"}).status_code == 422
+
+
+def test_audit_actions_facets() -> None:
+    client = _dev_client(_audit_fixture_db())
+    body = client.get(f"/api/guild/{GUILD}/audit/actions").json()
+    assert {item["action"] for item in body["items"]} == {
+        "bot.timeout",
+        "bot.move",
+        "stalker.add",
+        "settings.patch",
+    }
+    assert all(item["count"] == 1 for item in body["items"])
+
+
 def test_write_endpoints_require_login_when_auth_enabled() -> None:
     cfg = WebConfig(
         mongo_uri="",

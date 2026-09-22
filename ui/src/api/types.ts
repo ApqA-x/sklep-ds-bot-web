@@ -19,6 +19,8 @@ export type Leaderboard = {
   guildId: string;
   period: Period;
   limit: number;
+  page: number;
+  total: number;
   cached: boolean;
   items: LeaderboardItem[];
 };
@@ -218,14 +220,27 @@ export type ChatChannel = {
   lastAt: string | null;
 };
 
+export type ChatAttachment = {
+  id: string;
+  filename: string;
+  contentType: string;
+  size: number;
+  kind: string; // image | video | audio | file
+  path: string; // относительный путь в /media, пуст если не сохранили
+  stored: boolean;
+  url: string; // исходная ссылка Discord (запасной вариант)
+};
+
 export type ChatMessage = {
   messageId: string;
+  channelId: string;
   authorUserId: string;
   authorName: string | null;
   content: string;
   sentAt: string;
   editedAt: string | null;
   deletedAt: string | null;
+  attachments: ChatAttachment[];
 };
 
 export type ChatMessagesPage = {
@@ -233,7 +248,9 @@ export type ChatMessagesPage = {
   channelId: string;
   items: ChatMessage[];
   hasMore: boolean;
+  sort: string;
   nextBefore: string | null;
+  nextAfter: string | null;
 };
 
 export type GuildAccess = {

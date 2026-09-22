@@ -71,10 +71,32 @@ def _iso(value: Any) -> Any:
     return value
 
 
+class InvalidDate(ValueError):
+    """строка не парсится как дата/дата-время"""
+
+
+def parse_date_bound(value: str, *, end: bool) -> datetime | None:
+    """Граница периода: 'YYYY-MM-DD' (для end — включая весь день) или полный ISO."""
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        if len(value) == 10:
+            day = datetime.strptime(value, "%Y-%m-%d").date()
+            edge = datetime.max.time() if end else datetime.min.time()
+            return datetime.combine(day, edge, tzinfo=timezone.utc)
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise InvalidDate(value) from None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
+
+
 # --- pipeline builders (pure, unit-tested without a database) ---
 
 
-def build_leaderboard_pipeline(guild_id: str, cutoff: datetime | None, limit: int) -> list[dict]:
+def build_leaderboard_pipeline(guild_id: str, cutoff: datetime | None, limit: int, skip: int = 0) -> list[dict]:
     match: dict[str, Any] = {"guildId": guild_id}
     if cutoff is not None:
         match["joinedAt"] = {"$gte": cutoff}
@@ -90,7 +112,12 @@ def build_leaderboard_pipeline(guild_id: str, cutoff: datetime | None, limit: in
             }
         },
         {"$sort": {"totalMs": -1}},
-        {"$limit": limit},
+        {
+            "$facet": {
+                "page": [{"$skip": skip}, {"$limit": limit}],
+                "total": [{"$count": "n"}],
+            }
+        },
     ]
 
 
@@ -164,14 +191,16 @@ def build_member_search_pipeline(guild_id: str, query: str, cutoff: datetime, li
 # --- executors (db is a pymongo Database or a test fake with the same surface) ---
 
 
-def leaderboard(db: Any, guild_id: str, period: str, limit: int) -> tuple[list[dict], bool]:
-    key = (guild_id, period, limit)
+def leaderboard(db: Any, guild_id: str, period: str, limit: int, page: int = 1) -> tuple[list[dict], int, bool]:
+    """Страница лидерборда: (items, total_users, cached)."""
+    key = (guild_id, period, limit, page)
     cached = _leaderboard_cache.get(key)
     if cached is not None:
-        return cached, True
+        return cached[0], cached[1], True
     rows = db[COLL_PARTICIPANTS].aggregate(
-        build_leaderboard_pipeline(guild_id, period_cutoff(period), limit)
+        build_leaderboard_pipeline(guild_id, period_cutoff(period), limit, (page - 1) * limit)
     )
+    facet = next(iter(rows), None) or {}
     items = [
         {
             "userId": str(row["_id"]),
@@ -179,10 +208,12 @@ def leaderboard(db: Any, guild_id: str, period: str, limit: int) -> tuple[list[d
             "totalMs": int(row.get("totalMs") or 0),
             "appearances": int(row.get("appearances") or 0),
         }
-        for row in rows
+        for row in facet.get("page", [])
     ]
-    _leaderboard_cache.set(key, items)
-    return items, False
+    total_rows = facet.get("total") or []
+    total = int(total_rows[0]["n"]) if total_rows else 0
+    _leaderboard_cache.set(key, (items, total))
+    return items, total, False
 
 
 def active_sessions(db: Any, guild_id: str) -> list[dict]:
@@ -446,33 +477,86 @@ def chat_channels(db: Any, guild_id: str) -> list[dict[str, Any]]:
 
 
 def chat_messages(
-    db: Any, guild_id: str, channel_id: str, before: datetime | None, limit: int
+    db: Any,
+    guild_id: str,
+    channel_id: str | None,
+    before: datetime | None,
+    limit: int,
+    *,
+    after: datetime | None = None,
+    user_id: str | None = None,
+    msg_type: str | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    sort: str = "desc",
 ) -> dict[str, Any]:
-    where: dict[str, Any] = {"guildId": guild_id, "channelId": channel_id}
-    if before is not None:
-        where["sentAt"] = {"$lt": before}
-    docs = list(db[COLL_CHAT].find(where, sort=[("sentAt", -1)], limit=limit + 1))
+    where: dict[str, Any] = {"guildId": guild_id}
+    if channel_id:
+        where["channelId"] = channel_id
+    if user_id:
+        where["authorUserId"] = user_id
+    if before is not None or after is not None or date_from is not None or date_to is not None:
+        bounds: dict[str, Any] = {}
+        if before is not None:
+            bounds["$lt"] = before
+        if after is not None:
+            bounds["$gt"] = after
+        if date_from is not None:
+            bounds["$gte"] = date_from
+        if date_to is not None:
+            bounds["$lte"] = date_to
+        where["sentAt"] = bounds
+    if msg_type == "image":
+        where["attachments.kind"] = "image"
+    elif msg_type == "file":
+        where["attachments.0"] = {"$exists": True}
+    elif msg_type == "link":
+        where["content"] = {"$regex": r"https?://"}
+    elif msg_type == "text":
+        where["$and"] = [
+            {"attachments.0": {"$exists": False}},
+            {"content": {"$not": {"$regex": r"https?://"}}},
+        ]
+    direction = 1 if sort == "asc" else -1
+    docs = list(db[COLL_CHAT].find(where, sort=[("sentAt", direction)], limit=limit + 1))
     has_more = len(docs) > limit
     page = docs[:limit]
     items = [
         {
             "messageId": str(doc.get("messageId") or doc.get("_id")),
+            "channelId": str(doc.get("channelId") or ""),
             "authorUserId": str(doc.get("authorUserId") or ""),
             "authorName": doc.get("authorName"),
             "content": doc.get("content") or "",
             "sentAt": _iso(doc.get("sentAt")),
             "editedAt": _iso(doc["editedAt"]) if doc.get("editedAt") else None,
             "deletedAt": _iso(doc["deletedAt"]) if doc.get("deletedAt") else None,
+            "attachments": [
+                {
+                    "id": str(a.get("id") or ""),
+                    "filename": a.get("filename") or "файл",
+                    "contentType": a.get("contentType") or "",
+                    "size": int(a.get("size") or 0),
+                    "kind": a.get("kind") or "file",
+                    "path": a.get("path") or "",
+                    "stored": bool(a.get("stored")),
+                    "url": a.get("url") or "",
+                }
+                for a in (doc.get("attachments") or [])
+                if isinstance(a, dict)
+            ],
         }
         for doc in page
     ]
-    items.reverse()  # хронологически снизу вверх, как в чате
+    items.sort(key=lambda item: item["sentAt"])  # ленту всегда показываем хронологически
     return {
         "guildId": guild_id,
-        "channelId": channel_id,
+        "channelId": channel_id or "",
         "items": items,
         "hasMore": has_more,
+        "sort": sort,
         "nextBefore": items[0]["sentAt"] if items else None,
+        "nextAfter": items[-1]["sentAt"] if items else None,
     }
 
 

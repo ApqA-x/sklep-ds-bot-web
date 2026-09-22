@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -10,6 +11,13 @@ from .auth import actor_of, require_guild_admin
 from .models import GuildSettingsPatch, ListMemberAction, StalkerAction
 
 SNOWFLAKE_RE = re.compile(r"^\d{5,25}$")
+
+
+def _date_bound(value: str, *, end: bool) -> datetime | None:
+    try:
+        return queries.parse_date_bound(value, end=end)
+    except queries.InvalidDate:
+        raise HTTPException(status_code=422, detail="invalid date") from None
 
 router = APIRouter(
     prefix="/api/guild/{guildId}",
@@ -79,6 +87,32 @@ def get_audit(
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=100),
     origin: str = Query("", pattern="^(|web|discord)$"),
+    userId: str = Query("", description="фильтр «над кем» совершено действие"),
+    action: str = Query(""),
+    ok: str = Query("", pattern="^(||1|0)$"),
+    dateFrom: str = Query(""),
+    dateTo: str = Query(""),
+    sort: str = Query("desc", pattern="^(asc|desc)$"),
 ) -> dict:
     guild = _guild(guildId)
-    return mutations.audit_page(_db(request), guild, page, size, origin or None)
+    if userId and not SNOWFLAKE_RE.match(userId):
+        raise HTTPException(status_code=422, detail="invalid userId")
+    return mutations.audit_page(
+        _db(request),
+        guild,
+        page,
+        size,
+        origin or None,
+        target_user=userId or None,
+        action=action.strip() or None,
+        ok=None if ok == "" else ok == "1",
+        date_from=_date_bound(dateFrom, end=False),
+        date_to=_date_bound(dateTo, end=True),
+        sort=sort,
+    )
+
+
+@router.get("/audit/actions")
+def get_audit_actions(request: Request, guildId: str) -> dict:
+    guild = _guild(guildId)
+    return {"guildId": guild, "items": mutations.audit_actions(_db(request), guild)}

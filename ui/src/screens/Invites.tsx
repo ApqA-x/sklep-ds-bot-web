@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -21,6 +21,7 @@ const TOPS = [5, 10, 20];
 
 export default function Invites() {
   const { guildId = "" } = useParams();
+  const navigate = useNavigate();
   const [period, setPeriod] = useState<Period>("30d");
   const [top, setTop] = useState(10);
   const [grid, setGrid] = useGridPref();
@@ -55,7 +56,17 @@ export default function Invites() {
                 <XAxis dataKey="userName" interval={0} angle={-20} height={50} textAnchor="end" />
                 <YAxis allowDecimals={false} />
                 <Tooltip formatter={(value) => [String(value), "приглашено"]} />
-                <Bar dataKey="count" fill="#a6e3a1" />
+                <Bar
+                  dataKey="count"
+                  fill="#a6e3a1"
+                  cursor="pointer"
+                  onClick={(state) => {
+                    const uid =
+                      (state?.payload as { userId?: string } | undefined)?.userId ??
+                      (state as { userId?: string } | undefined)?.userId;
+                    if (uid) navigate(`/g/${guildId}/users/${uid}`);
+                  }}
+                />
               </BarChart>
             </ResponsiveContainer>
           </div>

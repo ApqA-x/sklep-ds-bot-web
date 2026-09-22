@@ -25,7 +25,7 @@ def _clear_caches() -> None:
 
 def test_leaderboard_pipeline_period_and_all() -> None:
     cutoff = _dt(1)
-    pipeline = queries.build_leaderboard_pipeline("123", cutoff, 50)
+    pipeline = queries.build_leaderboard_pipeline("123", cutoff, 50, skip=100)
     assert pipeline[0] == {"$match": {"guildId": "123", "joinedAt": {"$gte": cutoff}}}
     assert pipeline[1] == {"$sort": {"joinedAt": 1}}
     group = pipeline[2]["$group"]
@@ -33,10 +33,13 @@ def test_leaderboard_pipeline_period_and_all() -> None:
     assert group["userName"] == {"$last": "$userName"}
     assert group["totalMs"] == {"$sum": "$durationMs"}
     assert pipeline[3] == {"$sort": {"totalMs": -1}}
-    assert pipeline[4] == {"$limit": 50}
+    facet = pipeline[4]["$facet"]
+    assert facet["page"] == [{"$skip": 100}, {"$limit": 50}]
+    assert facet["total"] == [{"$count": "n"}]
 
     all_time = queries.build_leaderboard_pipeline("123", None, 10)
     assert all_time[0]["$match"] == {"guildId": "123"}
+    assert all_time[4]["$facet"]["page"] == [{"$skip": 0}, {"$limit": 10}]
 
 
 def test_invites_by_inviter_pipeline_requires_inviter() -> None:
@@ -90,21 +93,40 @@ def test_leaderboard_executor_converts_and_caches() -> None:
     db[queries.COLL_PARTICIPANTS] = FakeCollection(
         queries.COLL_PARTICIPANTS,
         aggregate_results=[
-            [{"_id": "777", "userName": "Vasya", "totalMs": 500, "appearances": 3},
-             {"_id": "888", "userName": None, "totalMs": 100, "appearances": 1}]
+            [
+                {
+                    "page": [
+                        {"_id": "777", "userName": "Vasya", "totalMs": 500, "appearances": 3},
+                        {"_id": "888", "userName": None, "totalMs": 100, "appearances": 1},
+                    ],
+                    "total": [{"n": 42}],
+                }
+            ]
         ],
     )
-    items, cached = queries.leaderboard(db, "123", "7d", 50)
+    items, total, cached = queries.leaderboard(db, "123", "7d", 50)
     assert cached is False
+    assert total == 42
     assert items == [
         {"userId": "777", "userName": "Vasya", "totalMs": 500, "appearances": 3},
         {"userId": "888", "userName": "unknown", "totalMs": 100, "appearances": 1},
     ]
-    items2, cached2 = queries.leaderboard(db, "123", "7d", 50)
+    items2, total2, cached2 = queries.leaderboard(db, "123", "7d", 50)
     assert cached2 is True
+    assert total2 == 42
     assert items2 == items
     # второй вызов не должен ходить в базу
     assert len(db[queries.COLL_PARTICIPANTS].calls) == 1
+
+
+def test_leaderboard_executor_empty_page() -> None:
+    db = FakeDB()
+    db[queries.COLL_PARTICIPANTS] = FakeCollection(
+        queries.COLL_PARTICIPANTS, aggregate_results=[[{"page": [], "total": []}]]
+    )
+    items, total, cached = queries.leaderboard(db, "123", "30d", 50, page=7)
+    assert items == []
+    assert total == 0
 
 
 def test_active_sessions_groups_participants() -> None:

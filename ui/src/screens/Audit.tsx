@@ -2,6 +2,8 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { api } from "../api/client";
+import { AuditDetails } from "../components/auditText";
+import { TargetUserPicker } from "../components/userSearch";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDate } from "../lib/format";
 import { DName } from "../names";
@@ -14,10 +16,19 @@ const FILTERS: { key: OriginFilter; label: string }[] = [
   { key: "discord", label: "Через Discord" },
 ];
 
+const OK_FILTERS: { key: "" | "1" | "0"; label: string }[] = [
+  { key: "", label: "любой итог" },
+  { key: "1", label: "успешные" },
+  { key: "0", label: "ошибки" },
+];
+
 function OriginBadge({ origin }: { origin: "web" | "discord" | undefined }) {
   const isDiscord = origin === "discord";
   return (
-    <span className={isDiscord ? "badge discord" : "badge web"} title={isDiscord ? "выполнено через Discord API" : "изменение через сайт"}>
+    <span
+      className={isDiscord ? "badge discord" : "badge web"}
+      title={isDiscord ? "выполнено через Discord API" : "изменение через сайт"}
+    >
       {isDiscord ? "Discord" : "сайт"}
     </span>
   );
@@ -27,10 +38,36 @@ export default function Audit() {
   const { guildId = "" } = useParams();
   const [page, setPage] = useState(1);
   const [origin, setOrigin] = useState<OriginFilter>("");
+  const [okFilter, setOkFilter] = useState<"" | "1" | "0">("");
+  const [action, setAction] = useState("");
+  const [target, setTarget] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
+  const [sort, setSort] = useState<"asc" | "desc">("desc");
+
+  const resetPage = () => setPage(1);
+
   const query = useQuery({
-    queryKey: ["audit", guildId, page, origin],
-    queryFn: () => api.audit(guildId, page, 50, origin || undefined),
+    queryKey: ["audit", guildId, page, origin, okFilter, action, target, dateFrom, dateTo, sort],
+    queryFn: () =>
+      api.audit(guildId, {
+        page,
+        size: 50,
+        origin: origin || undefined,
+        ok: okFilter || undefined,
+        action: action || undefined,
+        userId: target || undefined,
+        dateFrom: dateFrom || undefined,
+        dateTo: dateTo || undefined,
+        sort,
+      }),
     placeholderData: (prev) => prev,
+  });
+
+  const facets = useQuery({
+    queryKey: ["audit-actions", guildId],
+    queryFn: () => api.auditActions(guildId),
+    staleTime: 300_000,
   });
 
   if (query.isLoading) return <Loading />;
@@ -39,6 +76,7 @@ export default function Audit() {
   if (!data) return null;
 
   const pages = Math.max(1, Math.ceil(data.total / data.size));
+  const hasFilters = Boolean(origin || okFilter || action || target || dateFrom || dateTo || sort !== "desc");
 
   return (
     <Section title={`Журнал изменений (${data.total})`}>
@@ -49,12 +87,98 @@ export default function Audit() {
             className={f.key === origin ? "chip active" : "chip"}
             onClick={() => {
               setOrigin(f.key);
-              setPage(1);
+              resetPage();
             }}
           >
             {f.label}
           </button>
         ))}
+        {OK_FILTERS.map((f) => (
+          <button
+            key={f.key || "any"}
+            className={f.key === okFilter ? "chip active" : "chip"}
+            onClick={() => {
+              setOkFilter(f.key);
+              resetPage();
+            }}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+      <div className="toolbar">
+        <select
+          value={action}
+          onChange={(e) => {
+            setAction(e.target.value);
+            resetPage();
+          }}
+        >
+          <option value="">все действия</option>
+          {(facets.data?.items ?? []).map((a) => (
+            <option key={a.action} value={a.action}>
+              {a.action} ({a.count})
+            </option>
+          ))}
+        </select>
+        <TargetUserPicker
+          guildId={guildId}
+          placeholder="пользователь, над которым…"
+          value={target}
+          onChange={(id) => {
+            setTarget(id);
+            resetPage();
+          }}
+        />
+        <label className="chart-control">
+          <span>с</span>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => {
+              setDateFrom(e.target.value);
+              resetPage();
+            }}
+          />
+        </label>
+        <label className="chart-control">
+          <span>по</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => {
+              setDateTo(e.target.value);
+              resetPage();
+            }}
+          />
+        </label>
+        <button
+          className="chip"
+          title="порядок по дате"
+          onClick={() => {
+            setSort((s) => (s === "desc" ? "asc" : "desc"));
+            resetPage();
+          }}
+        >
+          {sort === "desc" ? "сначала новые ↓" : "сначала старые ↑"}
+        </button>
+        {hasFilters && (
+          <button
+            className="linklike"
+            onClick={() => {
+              setOrigin("");
+              setOkFilter("");
+              setAction("");
+              setTarget("");
+              setDateFrom("");
+              setDateTo("");
+              setSort("desc");
+              resetPage();
+            }}
+          >
+            сбросить
+          </button>
+        )}
         <span style={{ flex: 1 }} />
         <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
           ←
@@ -75,7 +199,6 @@ export default function Audit() {
               <th>Когда</th>
               <th>Откуда</th>
               <th>Кто</th>
-              <th>Действие</th>
               <th>Детали</th>
               <th>Итог</th>
             </tr>
@@ -96,11 +219,10 @@ export default function Audit() {
                     "—"
                   )}
                 </td>
-                <td>{item.action}</td>
                 <td>
-                  <pre className="inline">{JSON.stringify(item.after ?? item.before ?? null)}</pre>
+                  <AuditDetails item={item} />
                 </td>
-                <td>{item.ok ? "ok" : "ошибка"}</td>
+                <td>{item.ok ? "ok" : <span style={{ color: "var(--red)" }}>ошибка</span>}</td>
               </tr>
             ))}
           </tbody>

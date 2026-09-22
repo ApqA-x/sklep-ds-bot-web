@@ -75,8 +75,10 @@ export const api = {
 
   guilds: () => apiGet<{ guilds: GuildAccess[] }>("/api/guilds"),
 
-  leaderboard: (guildId: string, period: Period, limit = 50) =>
-    apiGet<Leaderboard>(`/api/guild/${guildId}/leaderboard?period=${period}&limit=${limit}`),
+  leaderboard: (guildId: string, period: Period, limit = 50, page = 1) =>
+    apiGet<Leaderboard>(
+      `/api/guild/${guildId}/leaderboard?period=${period}&limit=${limit}&page=${page}`,
+    ),
 
   activeSessions: (guildId: string) =>
     apiGet<{ guildId: string; items: ActiveSession[] }>(`/api/guild/${guildId}/sessions/active`),
@@ -129,14 +131,59 @@ export const api = {
   chatChannels: (guildId: string) =>
     apiGet<{ guildId: string; items: ChatChannel[] }>(`/api/guild/${guildId}/chat/channels`),
 
-  chatMessages: (guildId: string, channelId: string, before?: string) =>
-    apiGet<ChatMessagesPage>(
-      `/api/guild/${guildId}/chat?channelId=${channelId}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
-    ),
+  chatMessages: (
+    guildId: string,
+    opts: {
+      channelId?: string;
+      before?: string;
+      after?: string;
+      limit?: number;
+      userId?: string;
+      type?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      sort?: "asc" | "desc";
+    } = {},
+  ) => {
+    const p = new URLSearchParams();
+    if (opts.channelId) p.set("channelId", opts.channelId);
+    if (opts.before) p.set("before", opts.before);
+    if (opts.after) p.set("after", opts.after);
+    p.set("limit", String(opts.limit ?? 50));
+    for (const key of ["userId", "type", "dateFrom", "dateTo", "sort"] as const) {
+      const value = opts[key];
+      if (value) p.set(key, value);
+    }
+    return apiGet<ChatMessagesPage>(`/api/guild/${guildId}/chat?${p.toString()}`);
+  },
 
-  audit: (guildId: string, page = 1, size = 50, origin?: "web" | "discord") =>
-    apiGet<AuditPage>(
-      `/api/guild/${guildId}/audit?page=${page}&size=${size}${origin ? `&origin=${origin}` : ""}`,
+  audit: (
+    guildId: string,
+    opts: {
+      page?: number;
+      size?: number;
+      origin?: string;
+      userId?: string;
+      action?: string;
+      ok?: string; // "" | "1" | "0"
+      dateFrom?: string;
+      dateTo?: string;
+      sort?: "asc" | "desc";
+    } = {},
+  ) => {
+    const p = new URLSearchParams();
+    p.set("page", String(opts.page ?? 1));
+    p.set("size", String(opts.size ?? 50));
+    for (const key of ["origin", "userId", "action", "ok", "dateFrom", "dateTo", "sort"] as const) {
+      const value = opts[key];
+      if (value) p.set(key, value);
+    }
+    return apiGet<AuditPage>(`/api/guild/${guildId}/audit?${p.toString()}`);
+  },
+
+  auditActions: (guildId: string) =>
+    apiGet<{ guildId: string; items: { action: string; count: number }[] }>(
+      `/api/guild/${guildId}/audit/actions`,
     ),
 
   botRole: (guildId: string, userId: string, roleId: string, action: "grant" | "revoke") =>

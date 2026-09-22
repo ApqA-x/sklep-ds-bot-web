@@ -7,22 +7,23 @@ import { ErrorBox, Loading, Section } from "../components/ui";
 import { DName, type NameKind } from "../names";
 import { usePicker } from "../names";
 
-const ACTIVITY_EVENT_TYPES = [
-  "member_join",
-  "member_leave",
-  "invite_create",
-  "invite_delete",
-  "invite_used",
-  "message_create",
-  "message_update",
-  "message_delete",
-  "reaction_add",
-  "reaction_remove",
-  "voice_join",
-  "voice_leave",
-  "voice_move",
-  "profile_nickname_update",
-  "profile_roles_update",
+// [ключ в activityEventTypes, название, подсказка что бот публикует]
+const ACTIVITY_EVENT_TYPES: [string, string, string][] = [
+  ["member_join", "Приход на сервер", "карточка, когда участник заходит на сервер"],
+  ["member_leave", "Уход с сервера", "карточка, когда участник покидает сервер (ушёл, кик, бан)"],
+  ["invite_create", "Создание инвайта", "кто и с какими параметрами создал приглашение"],
+  ["invite_delete", "Удаление инвайта", "кто удалил приглашение (или оно истекло)"],
+  ["invite_used", "Использование инвайта", "кто вошёл по чьей ссылке"],
+  ["message_create", "Новые сообщения", "карточка на каждое новое сообщение"],
+  ["message_update", "Редактирование сообщений", "сообщение изменено — старое и новое"],
+  ["message_delete", "Удаление сообщений", "кто автор и кто удалил"],
+  ["reaction_add", "Реакции: поставили", "кто добавил реакцию"],
+  ["reaction_remove", "Реакции: убрали", "кто снял реакцию"],
+  ["voice_join", "Заход в голос", "участник зашёл в голосовой канал"],
+  ["voice_leave", "Выход из голоса", "участник покинул голосовой канал"],
+  ["voice_move", "Перемещение в голосе", "участника перенесли между каналами"],
+  ["profile_nickname_update", "Смена ника", "участник изменил ник на сервере"],
+  ["profile_roles_update", "Изменение ролей", "кто получил/лишился ролей, с инициатором"],
 ];
 
 // категории activity-карточек, которые понимает бот (domain.ACTIVITY_CATEGORIES)
@@ -383,22 +384,25 @@ export default function Settings() {
           ))}
         </div>
         <div className="events-grid">
-          {ACTIVITY_EVENT_TYPES.map((t) => (
-            <label key={t} className="check">
+          {ACTIVITY_EVENT_TYPES.map(([key, title, hint]) => (
+            <label key={key} className="check" title={hint}>
               <input
                 type="checkbox"
                 disabled={!canWrite}
-                checked={eventTypes.includes(t)}
+                checked={eventTypes.includes(key)}
                 onChange={(e) =>
                   set(
                     "activityEventTypes",
                     e.target.checked
-                      ? [...new Set([...eventTypes, t])]
-                      : eventTypes.filter((x) => x !== t),
+                      ? [...new Set([...eventTypes, key])]
+                      : eventTypes.filter((x) => x !== key),
                   )
                 }
               />
-              {t}
+              <span>
+                {title}
+                <span className="muted tiny"> — {hint}</span>
+              </span>
             </label>
           ))}
         </div>

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -163,12 +164,52 @@ def mutate_stalker(db: Any, guild_id: str, body: StalkerAction, actor: dict[str,
     return {"ok": True, "subscriptionId": sub_id}
 
 
-def audit_page(db: Any, guild_id: str, page: int, size: int, origin: str | None = None) -> dict[str, Any]:
+_SNOWFLAKE = re.compile(r"^\d{5,25}$")
+
+
+def _target_filter(user_id: str) -> dict[str, Any]:
+    """«Над кем» совершено действие: after.userId либо target из stalker-подписки."""
+    return {
+        "$or": [
+            {"after.userId": user_id},
+            {"after.subscriptionId": {"$regex": f":{re.escape(user_id)}$"}},
+        ]
+    }
+
+
+def audit_page(
+    db: Any,
+    guild_id: str,
+    page: int,
+    size: int,
+    origin: str | None = None,
+    *,
+    target_user: str | None = None,
+    action: str | None = None,
+    ok: bool | None = None,
+    date_from: datetime | None = None,
+    date_to: datetime | None = None,
+    sort: str = "desc",
+) -> dict[str, Any]:
     where: dict[str, Any] = {"guildId": guild_id}
     if origin:
         where["origin"] = origin
+    if action:
+        where["action"] = action
+    if ok is not None:
+        where["ok"] = ok
+    if target_user:
+        where["$and"] = [_target_filter(target_user)]
+    bounds: dict[str, Any] = {}
+    if date_from is not None:
+        bounds["$gte"] = date_from
+    if date_to is not None:
+        bounds["$lte"] = date_to
+    if bounds:
+        where["at"] = bounds
+    direction = 1 if sort == "asc" else -1
     total = db[COLL_AUDIT].count_documents(where)
-    docs = db[COLL_AUDIT].find(where, sort=[("at", -1)], skip=(page - 1) * size, limit=size)
+    docs = db[COLL_AUDIT].find(where, sort=[("at", direction)], skip=(page - 1) * size, limit=size)
     return {
         "guildId": guild_id,
         "page": page,
@@ -189,3 +230,15 @@ def audit_page(db: Any, guild_id: str, page: int, size: int, origin: str | None 
             for doc in docs
         ],
     }
+
+
+def audit_actions(db: Any, guild_id: str) -> list[dict[str, Any]]:
+    """Distinct значения action с количеством — наполняет фильтр в UI."""
+    rows = db[COLL_AUDIT].aggregate(
+        [
+            {"$match": {"guildId": guild_id}},
+            {"$group": {"_id": "$action", "n": {"$sum": 1}}},
+            {"$sort": {"n": -1}},
+        ]
+    )
+    return [{"action": str(row["_id"]), "count": int(row.get("n") or 0)} for row in rows if row.get("_id")]

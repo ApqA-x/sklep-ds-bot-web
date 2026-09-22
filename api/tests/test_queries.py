@@ -71,8 +71,15 @@ def test_ttl_cache_expiry() -> None:
     cache = queries.TTLCache(ttl_seconds=0.05)
     cache.set(("k",), [1])
     assert cache.get(("k",)) == [1]
-    time.sleep(0.06)
+    time.sleep(0.15)  # запас: таймер Windows грубый
     assert cache.get(("k",)) is None
+
+
+def test_iso_treats_naive_datetime_as_utc() -> None:
+    naive = datetime(2026, 4, 13, 19, 19, 58)
+    assert queries._iso(naive) == "2026-04-13T19:19:58Z"
+    aware = datetime(2026, 4, 13, 19, 19, 58, tzinfo=timezone.utc)
+    assert queries._iso(aware) == "2026-04-13T19:19:58Z"
 
 
 # --- executors ---

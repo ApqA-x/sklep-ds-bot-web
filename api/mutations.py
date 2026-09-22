@@ -20,7 +20,7 @@ def _jsonable(value: Any) -> Any:
     if isinstance(value, list):
         return [_jsonable(v) for v in value]
     if isinstance(value, datetime):
-        return value.isoformat().replace("+00:00", "Z")
+        return queries._iso(value)
     return value
 
 

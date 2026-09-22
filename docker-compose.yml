@@ -10,7 +10,8 @@ services:
   web:
     build: .
     ports:
-      - "127.0.0.1:8000:8000"
+      # наружный порт на хосте можно сменить: WEB_HOST_PORT=8081 docker compose up
+      - "127.0.0.1:${WEB_HOST_PORT:-8000}:8000"
     environment:
       MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017}
       MONGO_DB: ${MONGO_DB:-voice_tracker}

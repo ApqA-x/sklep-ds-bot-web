@@ -61,7 +61,12 @@ _invites_cache = TTLCache()
 
 
 def _iso(value: Any) -> Any:
-    return value.isoformat().replace("+00:00", "Z") if isinstance(value, datetime) else value
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            # Mongo хранит UTC; pymongo по умолчанию отдаёт naive-datetime
+            value = value.replace(tzinfo=timezone.utc)
+        return value.isoformat().replace("+00:00", "Z")
+    return value
 
 
 # --- pipeline builders (pure, unit-tested without a database) ---

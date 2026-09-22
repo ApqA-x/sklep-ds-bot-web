@@ -220,7 +220,10 @@ def test_ensure_web_indexes_names_and_errors() -> None:
     db[queries.COLL_PARTICIPANTS] = FakeCollection(queries.COLL_PARTICIPANTS)
     db[queries.COLL_SESSIONS] = FakeCollection(queries.COLL_SESSIONS, fail_create_index=True)
     result = queries.ensure_web_indexes(db)
-    assert result["created"] == ["voice_session_participants.web_guildId_joinedAt"]
+    assert result["created"] == [
+        "voice_session_participants.web_guildId_joinedAt",
+        "web_audit_logs.web_audit_guildId_at",
+    ]
     assert result["errors"] == ["voice_sessions.web_guildId_status_endedAt: RuntimeError"]
     keys, kw = db[queries.COLL_PARTICIPANTS].calls[0][2], db[queries.COLL_PARTICIPANTS].calls[0][3]
     assert keys == [("guildId", 1), ("joinedAt", 1)]

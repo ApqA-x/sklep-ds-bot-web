@@ -38,6 +38,13 @@ def _sorted(docs: list[dict], sort: Any) -> list[dict]:
     return docs
 
 
+class FakeUpdateResult:
+    def __init__(self, matched: int, modified: int, upserted_id: Any = None) -> None:
+        self.matched_count = matched
+        self.modified_count = modified
+        self.upserted_id = upserted_id
+
+
 class FakeCollection:
     def __init__(
         self,
@@ -82,6 +89,47 @@ class FakeCollection:
         if self.fail_create_index:
             raise RuntimeError("index build failed")
         return kw.get("name", "?")
+
+    def _apply_update(self, doc: dict, update: dict, *, inserted: bool) -> None:
+        for key, value in (update.get("$set") or {}).items():
+            doc[key] = value
+        if inserted:
+            for key, value in (update.get("$setOnInsert") or {}).items():
+                doc.setdefault(key, value)
+        for key, value in (update.get("$addToSet") or {}).items():
+            current = doc.setdefault(key, [])
+            if value not in current:
+                current.append(value)
+        for key, value in (update.get("$pull") or {}).items():
+            current = doc.get(key)
+            if isinstance(current, list):
+                doc[key] = [item for item in current if item != value]
+
+    def update_one(self, flt: dict, update: dict, upsert: bool = False, **kw):
+        self.calls.append(("update_one", self.name, flt, update, upsert))
+        for doc in self.docs:
+            if _matches(doc, flt):
+                self._apply_update(doc, update, inserted=False)
+                return FakeUpdateResult(1, 1)
+        if upsert:
+            new_doc = {k: v for k, v in flt.items() if not isinstance(v, dict)}
+            self._apply_update(new_doc, update, inserted=True)
+            self.docs.append(new_doc)
+            return FakeUpdateResult(0, 0, upserted_id=new_doc.get("_id"))
+        return FakeUpdateResult(0, 0)
+
+    def insert_one(self, doc: dict, **kw):
+        self.calls.append(("insert_one", self.name, doc))
+        self.docs.append(dict(doc))
+        return FakeUpdateResult(0, 0, upserted_id=doc.get("_id"))
+
+    def delete_one(self, flt: dict, **kw):
+        self.calls.append(("delete_one", self.name, flt))
+        for index, doc in enumerate(self.docs):
+            if _matches(doc, flt):
+                self.docs.pop(index)
+                return FakeUpdateResult(1, 0)
+        return FakeUpdateResult(0, 0)
 
 
 class FakeDB(dict):

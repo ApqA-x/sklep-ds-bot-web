@@ -4,11 +4,16 @@ import re
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from . import queries
+from .auth import require_guild_read
 
-router = APIRouter(prefix="/api/guild/{guildId}", tags=["read"])
+router = APIRouter(
+    prefix="/api/guild/{guildId}",
+    tags=["read"],
+    dependencies=[Depends(require_guild_read)],
+)
 
 SNOWFLAKE_RE = re.compile(r"^\d{5,25}$")
 

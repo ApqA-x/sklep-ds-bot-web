@@ -384,6 +384,7 @@ def search_members(db: Any, guild_id: str, query: str, limit: int) -> list[dict]
 WEB_INDEXES: list[tuple[str, list[tuple[str, int]], str]] = [
     (COLL_PARTICIPANTS, [("guildId", 1), ("joinedAt", 1)], "web_guildId_joinedAt"),
     (COLL_SESSIONS, [("guildId", 1), ("status", 1), ("endedAt", -1)], "web_guildId_status_endedAt"),
+    ("web_audit_logs", [("guildId", 1), ("at", -1)], "web_audit_guildId_at"),
 ]
 
 

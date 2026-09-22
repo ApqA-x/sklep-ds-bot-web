@@ -99,7 +99,7 @@ def create_app(
         app.add_middleware(
             SessionMiddleware,
             secret_key=cfg.web_session_secret,
-            https_only=True,
+            https_only=cfg.web_public_url.startswith("https://"),
             same_site="lax",
         )
 
@@ -115,7 +115,13 @@ def create_app(
         }
         return JSONResponse(payload, status_code=200)
 
+    from . import auth as auth_api
+    from . import write as write_api
+
+    app.include_router(auth_api.router)
+    app.include_router(auth_api.guilds_router)
     app.include_router(read_api.router)
+    app.include_router(write_api.router)
 
     # SPA catch-all: serve built ui/dist assets, fall back to index.html for client routes.
     @app.get("/{full_path:path}", response_model=None)

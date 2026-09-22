@@ -1,0 +1,110 @@
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+
+from fastapi import FastAPI, Request
+from fastapi.responses import FileResponse, JSONResponse
+from starlette.responses import Response
+
+from .config import WebConfig, load_config
+
+API_DIR = Path(__file__).resolve().parent
+UI_DIST = (API_DIR.parent / "ui" / "dist").resolve()
+
+VERSION = "0.1.0"
+
+
+def _mongo_ping(app: FastAPI) -> dict[str, object]:
+    mongo = getattr(app.state, "mongo", None)
+    if mongo is None:
+        return {"ok": False, "error": "not configured"}
+    try:
+        mongo.admin.command("ping")
+        return {"ok": True}
+    except Exception as exc:  # serverSelectionTimeoutMS bounds the wait
+        return {"ok": False, "error": type(exc).__name__}
+
+
+def _static_file(full_path: str) -> Path | None:
+    if not full_path:
+        return None
+    candidate = (UI_DIST / full_path).resolve()
+    if not candidate.is_file():
+        return None
+    try:
+        candidate.relative_to(UI_DIST)
+    except ValueError:
+        return None
+    return candidate
+
+
+def create_app(config: WebConfig | None = None, mongo_client: object | None = None) -> FastAPI:
+    cfg = config or load_config()
+    logging.basicConfig(
+        level=getattr(logging, cfg.log_level, logging.INFO),
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+    )
+
+    app = FastAPI(title="sklep-bot-web", version=VERSION, docs_url=None, redoc_url=None)
+    app.state.config = cfg
+
+    if mongo_client is None and cfg.mongo_uri:
+        try:
+            from pymongo import MongoClient
+
+            mongo_client = MongoClient(
+                cfg.mongo_uri,
+                serverSelectionTimeoutMS=2000,
+                connect=False,
+            )
+        except Exception:
+            mongo_client = None
+    app.state.mongo = mongo_client
+    if mongo_client is not None and cfg.mongo_db:
+        app.state.db = mongo_client[cfg.mongo_db]
+    else:
+        app.state.db = None
+
+    if cfg.auth_enabled:
+        from starlette.middleware.sessions import SessionMiddleware
+
+        app.add_middleware(
+            SessionMiddleware,
+            secret_key=cfg.web_session_secret,
+            https_only=True,
+            same_site="lax",
+        )
+
+    @app.get("/api/healthz")
+    def healthz(request: Request) -> JSONResponse:
+        mongo = _mongo_ping(request.app)
+        payload = {
+            "status": "ok" if mongo["ok"] else "degraded",
+            "service": "web",
+            "version": VERSION,
+            "mongo": mongo,
+            "auth_enabled": cfg.auth_enabled,
+        }
+        return JSONResponse(payload, status_code=200)
+
+    # SPA catch-all: serve built ui/dist assets, fall back to index.html for client routes.
+    @app.get("/{full_path:path}", response_model=None)
+    def spa(request: Request, full_path: str) -> Response:
+        if full_path.startswith("api/"):
+            return JSONResponse({"detail": "not found"}, status_code=404)
+        static = _static_file(full_path)
+        if static is not None:
+            return FileResponse(static)
+        index = UI_DIST / "index.html"
+        if index.is_file():
+            return FileResponse(index)
+        return JSONResponse(
+            {"detail": "ui not built — run `npm ci && npm run build` in ui/ or use the docker image"},
+            status_code=503,
+        )
+
+    return app
+
+
+app = create_app()

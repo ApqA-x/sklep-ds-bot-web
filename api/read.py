@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -131,6 +132,32 @@ def search_members(
 ) -> dict:
     guild = _snowflake(guildId, "guildId")
     return {"guildId": guild, "q": q, "items": queries.search_members(_db(request), guild, q, limit)}
+
+
+@router.get("/chat/channels")
+def chat_channels(request: Request, guildId: str) -> dict:
+    guild = _snowflake(guildId, "guildId")
+    return {"guildId": guild, "items": queries.chat_channels(_db(request), guild)}
+
+
+@router.get("/chat")
+def chat_messages(
+    request: Request,
+    guildId: str,
+    channelId: str = Query(...),
+    before: str = Query(""),
+    limit: int = Query(50, ge=1, le=200),
+) -> dict:
+    guild = _snowflake(guildId, "guildId")
+    _snowflake(channelId, "channelId")
+    before_dt = None
+    if before:
+        try:
+            parsed = datetime.fromisoformat(before.replace("Z", "+00:00"))
+        except ValueError:
+            raise HTTPException(status_code=422, detail="before must be an ISO datetime") from None
+        before_dt = parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return queries.chat_messages(_db(request), guild, channelId, before_dt, limit)
 
 
 @router.get("/names")

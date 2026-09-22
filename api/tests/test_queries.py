@@ -230,6 +230,7 @@ def test_ensure_web_indexes_names_and_errors() -> None:
     assert result["created"] == [
         "voice_session_participants.web_guildId_joinedAt",
         "web_audit_logs.web_audit_guildId_at",
+        "chat_messages.web_chat_guildId_channelId_sentAt",
     ]
     assert result["errors"] == ["voice_sessions.web_guildId_status_endedAt: RuntimeError"]
     keys, kw = db[queries.COLL_PARTICIPANTS].calls[0][2], db[queries.COLL_PARTICIPANTS].calls[0][3]

@@ -13,6 +13,9 @@ def _matches(doc: dict, flt: dict | None) -> bool:
                 if op == "$gte":
                     if value is None or value < want:
                         return False
+                elif op == "$lt":
+                    if value is None or value >= want:
+                        return False
                 elif op == "$lte":
                     if value is None or value > want:
                         return False

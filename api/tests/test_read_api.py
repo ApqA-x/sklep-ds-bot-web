@@ -189,3 +189,64 @@ def test_names_endpoint_without_token_uses_db_users() -> None:
 def test_names_endpoint_validation() -> None:
     client = _client(FakeDB())
     assert client.get("/api/guild/abc/names").status_code == 422
+
+
+def _chat_db() -> FakeDB:
+    db = FakeDB()
+    channel = "140000000000000000"
+    db[queries.COLL_CHAT] = FakeCollection(
+        queries.COLL_CHAT,
+        docs=[
+            {
+                "_id": f"m{i}",
+                "guildId": GUILD,
+                "channelId": channel,
+                "messageId": f"m{i}",
+                "authorUserId": USER,
+                "authorName": "alice",
+                "content": f"text {i}",
+                "sentAt": _dt(1 + i // 10).replace(hour=i % 10),
+            }
+            for i in range(12)
+        ],
+        aggregate_results=[[{"_id": channel, "count": 12, "lastAt": _dt(2).replace(hour=1)}]],
+    )
+    return db
+
+
+def test_chat_channels_endpoint() -> None:
+    db = _chat_db()
+    client = _client(db)
+    response = client.get(f"/api/guild/{GUILD}/chat/channels")
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert items == [{"channelId": "140000000000000000", "count": 12, "lastAt": "2026-09-02T01:00:00Z"}]
+
+
+def test_chat_messages_pagination_and_chronological_order() -> None:
+    db = _chat_db()
+    client = _client(db)
+    channel = "140000000000000000"
+    response = client.get(f"/api/guild/{GUILD}/chat", params={"channelId": channel, "limit": 5})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["hasMore"] is True
+    assert len(body["items"]) == 5
+    texts = [item["content"] for item in body["items"]]
+    assert texts == sorted(texts, key=lambda t: int(t.split()[-1]))  # хронологически
+    oldest = body["items"][0]["sentAt"]
+    assert body["nextBefore"] == oldest
+
+    page2 = client.get(f"/api/guild/{GUILD}/chat", params={"channelId": channel, "limit": 5, "before": oldest}).json()
+    assert all(item["sentAt"] < oldest for item in page2["items"])
+    assert set(item["content"] for item in page2["items"]).isdisjoint(set(texts))
+
+
+def test_chat_endpoint_validation() -> None:
+    client = _client(FakeDB())
+    assert client.get(f"/api/guild/{GUILD}/chat", params={"channelId": "bad"}).status_code == 422
+    assert client.get(f"/api/guild/{GUILD}/chat").status_code == 422  # channelId обязателен
+    assert (
+        client.get(f"/api/guild/{GUILD}/chat", params={"channelId": "140000000000000000", "before": "oops"}).status_code
+        == 422
+    )

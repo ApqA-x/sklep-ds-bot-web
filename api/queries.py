@@ -14,6 +14,7 @@ COLL_ROLE_STATE = "member_role_state"
 COLL_NICKNAME_HISTORY = "member_nickname_history"
 COLL_NICKNAME_STATE = "member_nickname_state"
 COLL_INVITE_CATALOG = "invite_catalog"
+COLL_CHAT = "chat_messages"
 
 PERIODS: dict[str, timedelta | None] = {
     "7d": timedelta(days=7),
@@ -427,10 +428,59 @@ def known_user_names(db: Any, guild_id: str) -> dict[str, str]:
     return names
 
 
+def chat_channels(db: Any, guild_id: str) -> list[dict[str, Any]]:
+    """Text channels of a guild that have stored messages, most recent activity first."""
+    pipeline = [
+        {"$match": {"guildId": guild_id}},
+        {"$sort": {"sentAt": -1}},
+        {"$group": {"_id": "$channelId", "count": {"$sum": 1}, "lastAt": {"$first": "$sentAt"}}},
+        {"$sort": {"lastAt": -1}},
+        {"$limit": 200},
+    ]
+    rows = list(db[COLL_CHAT].aggregate(pipeline))
+    return [
+        {"channelId": str(row["_id"]), "count": int(row.get("count") or 0), "lastAt": _iso(row.get("lastAt"))}
+        for row in rows
+        if row.get("_id")
+    ]
+
+
+def chat_messages(
+    db: Any, guild_id: str, channel_id: str, before: datetime | None, limit: int
+) -> dict[str, Any]:
+    where: dict[str, Any] = {"guildId": guild_id, "channelId": channel_id}
+    if before is not None:
+        where["sentAt"] = {"$lt": before}
+    docs = list(db[COLL_CHAT].find(where, sort=[("sentAt", -1)], limit=limit + 1))
+    has_more = len(docs) > limit
+    page = docs[:limit]
+    items = [
+        {
+            "messageId": str(doc.get("messageId") or doc.get("_id")),
+            "authorUserId": str(doc.get("authorUserId") or ""),
+            "authorName": doc.get("authorName"),
+            "content": doc.get("content") or "",
+            "sentAt": _iso(doc.get("sentAt")),
+            "editedAt": _iso(doc["editedAt"]) if doc.get("editedAt") else None,
+            "deletedAt": _iso(doc["deletedAt"]) if doc.get("deletedAt") else None,
+        }
+        for doc in page
+    ]
+    items.reverse()  # хронологически снизу вверх, как в чате
+    return {
+        "guildId": guild_id,
+        "channelId": channel_id,
+        "items": items,
+        "hasMore": has_more,
+        "nextBefore": items[0]["sentAt"] if items else None,
+    }
+
+
 WEB_INDEXES: list[tuple[str, list[tuple[str, int]], str]] = [
     (COLL_PARTICIPANTS, [("guildId", 1), ("joinedAt", 1)], "web_guildId_joinedAt"),
     (COLL_SESSIONS, [("guildId", 1), ("status", 1), ("endedAt", -1)], "web_guildId_status_endedAt"),
     ("web_audit_logs", [("guildId", 1), ("at", -1)], "web_audit_guildId_at"),
+    (COLL_CHAT, [("guildId", 1), ("channelId", 1), ("sentAt", -1)], "web_chat_guildId_channelId_sentAt"),
 ]
 
 

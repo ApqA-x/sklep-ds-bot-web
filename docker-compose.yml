@@ -24,6 +24,11 @@ services:
       DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI:-}
       WEB_SESSION_SECRET: ${WEB_SESSION_SECRET:-}
       WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:-}
+      # картинки из чата: тот же external volume dsbot-media, куда gateway пишет
+      # вложения (docker volume create dsbot-media — один раз на хосте)
+      MEDIA_DIR: ${MEDIA_DIR:-/data/media}
+    volumes:
+      - dsbot-media:/data/media:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -31,3 +36,5 @@ services:
 
 volumes:
   mongo-data:
+  dsbot-media:
+    external: true

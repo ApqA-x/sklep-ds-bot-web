@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 
 from . import read as read_api
@@ -16,6 +17,10 @@ API_DIR = Path(__file__).resolve().parent
 UI_DIST = (API_DIR.parent / "ui" / "dist").resolve()
 
 VERSION = "0.1.0"
+
+
+def _clean(value: str | None) -> str:
+    return (value or "").strip()
 
 
 def _mongo_ping(app: FastAPI) -> dict[str, object]:
@@ -124,6 +129,15 @@ def create_app(
     app.include_router(read_api.router)
     app.include_router(write_api.router)
     app.include_router(bot_api.router)
+
+    # Раздача сохранённых вложений (картинки, скачанные ботом в общий volume).
+    # Пути содержат sha256 содержимого — наружу не угадать; доступ без сессии
+    # осознанно: это те же картинки, что лежали открытыми на CDN Discord.
+    media_dir = _clean(cfg.media_dir)
+    if media_dir:
+        media_root = Path(media_dir)
+        media_root.mkdir(parents=True, exist_ok=True)
+        app.mount("/media", StaticFiles(directory=str(media_root)), name="media")
 
     # SPA catch-all: serve built ui/dist assets, fall back to index.html for client routes.
     @app.get("/{full_path:path}", response_model=None)

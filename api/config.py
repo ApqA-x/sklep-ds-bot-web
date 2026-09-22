@@ -25,6 +25,7 @@ class WebConfig:
     discord_redirect_uri: str = ""
     web_session_secret: str = ""
     web_public_url: str = ""
+    media_dir: str = ""
     log_level: str = "INFO"
     warnings: list[str] = field(default_factory=list)
 
@@ -49,6 +50,7 @@ def load_config(env: Any = None) -> WebConfig:
         discord_redirect_uri=_get(source, "DISCORD_REDIRECT_URI"),
         web_session_secret=_get(source, "WEB_SESSION_SECRET"),
         web_public_url=_get(source, "WEB_PUBLIC_URL"),
+        media_dir=_get(source, "MEDIA_DIR"),
         log_level=_get(source, "LOG_LEVEL", "INFO").upper(),
     )
     try:

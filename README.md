@@ -34,6 +34,18 @@ curl http://127.0.0.1:8000/api/healthz
 MONGO_URI=mongodb://host.docker.internal:27017 docker compose up -d --no-deps --build web
 ```
 
+Картинки чата (`/media`): web читает external volume `dsbot-media`, куда бот
+(dsbot-gateway) пишет скачанные вложения. Один раз на хосте до `up`:
+
+
+```bash
+docker volume create dsbot-media
+```
+
+`MEDIA_DIR` пусто — раздача `/media` выключена, UI показывает ссылки Discord.
+Отдельный Nginx перед `/media` не обязателен: пути содержат sha256 содержимого
+и не угадываются извне.
+
 Без Docker (dev):
 
 ```bash

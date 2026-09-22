@@ -11,6 +11,8 @@ from .config import WebConfig
 API = "https://discord.com/api/v10"
 _BOT_GUILD_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
 _BOT_GUILD_TTL = 60.0
+_GUILD_RESOURCE_CACHE: dict[tuple[str, str], tuple[float, Any]] = {}
+_GUILD_RESOURCE_TTL = 300.0
 
 
 class DiscordError(RuntimeError):
@@ -93,6 +95,28 @@ async def bot_guilds(cfg: WebConfig) -> list[dict[str, Any]]:
     guilds = await fetch_bot_guilds(cfg)
     _BOT_GUILD_CACHE[key] = (time.monotonic(), guilds)
     return guilds
+
+
+async def _cached_guild_resource(cfg: WebConfig, guild_id: str, kind: str) -> dict[str, str]:
+    key = (guild_id, kind)
+    cached = _GUILD_RESOURCE_CACHE.get(key)
+    if cached is not None and time.monotonic() - cached[0] < _GUILD_RESOURCE_TTL:
+        return cached[1]
+    if not cfg.discord_token:
+        return {}
+    headers = {"Authorization": f"Bot {cfg.discord_token}"}
+    rows = await _get_json(f"{API}/guilds/{guild_id}/{kind}", headers, op=kind) or []
+    names = {str(row["id"]): str(row.get("name") or "") for row in rows if row.get("id")}
+    _GUILD_RESOURCE_CACHE[key] = (time.monotonic(), names)
+    return names
+
+
+async def guild_channel_names(cfg: WebConfig, guild_id: str) -> dict[str, str]:
+    return await _cached_guild_resource(cfg, guild_id, "channels")
+
+
+async def guild_role_names(cfg: WebConfig, guild_id: str) -> dict[str, str]:
+    return await _cached_guild_resource(cfg, guild_id, "roles")
 
 
 async def member_permissions(cfg: WebConfig, guild_id: str, user_id: str) -> int | None:

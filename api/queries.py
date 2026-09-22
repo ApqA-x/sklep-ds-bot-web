@@ -12,6 +12,7 @@ COLL_JOIN_ATTRIBUTIONS = "member_join_attributions"
 COLL_JOIN_STATE = "member_join_state"
 COLL_ROLE_STATE = "member_role_state"
 COLL_NICKNAME_HISTORY = "member_nickname_history"
+COLL_NICKNAME_STATE = "member_nickname_state"
 COLL_INVITE_CATALOG = "invite_catalog"
 
 PERIODS: dict[str, timedelta | None] = {
@@ -397,6 +398,33 @@ def search_members(db: Any, guild_id: str, query: str, limit: int) -> list[dict]
     cutoff = _utc_now() - ACTIVE_MEMBER_SEARCH_WINDOW
     rows = db[COLL_PARTICIPANTS].aggregate(build_member_search_pipeline(guild_id, query, cutoff, limit))
     return [{"userId": str(row["_id"]), "userName": row.get("userName") or "unknown"} for row in rows]
+
+
+_names_cache = TTLCache(ttl_seconds=300.0)
+
+
+def known_user_names(db: Any, guild_id: str) -> dict[str, str]:
+    """userId -> best known display name (current nickname, else last seen username)."""
+    cached = _names_cache.get(guild_id)
+    if cached is not None:
+        return cached
+    names: dict[str, str] = {}
+    cutoff = _utc_now() - ACTIVE_MEMBER_SEARCH_WINDOW
+    pipeline = [
+        {"$match": {"guildId": guild_id, "joinedAt": {"$gte": cutoff}}},
+        {"$sort": {"joinedAt": 1}},
+        {"$group": {"_id": "$userId", "userName": {"$last": "$userName"}}},
+    ]
+    for row in db[COLL_PARTICIPANTS].aggregate(pipeline):
+        name = str(row.get("userName") or "")
+        if name:
+            names[str(row["_id"])] = name
+    for doc in db[COLL_NICKNAME_STATE].find({"guildId": guild_id}, projection={"userId": 1, "nickname": 1}):
+        nickname = str(doc.get("nickname") or "")
+        if nickname:
+            names[str(doc.get("userId"))] = nickname
+    _names_cache.set(guild_id, names)
+    return names
 
 
 WEB_INDEXES: list[tuple[str, list[tuple[str, int]], str]] = [

@@ -148,6 +148,39 @@ def test_audit_page_lists_recent_first() -> None:
     body = response.json()
     assert body["total"] == 2
     assert [item["action"] for item in body["items"]] == ["trustedUserIds.add", "settings.patch"]
+    assert all(item["origin"] == "web" for item in body["items"])
+
+
+def test_audit_origin_filter() -> None:
+    db = _settings_db()
+    client = _dev_client(db)
+    client.patch(f"/api/guild/{GUILD}/settings", json={"trackingMode": "none"})  # origin web
+    db[COLL_AUDIT].docs.append(  # имитация записи, выполненной через Discord API
+        {
+            "guildId": GUILD,
+            "actorUserId": USER,
+            "actorName": "boss",
+            "action": "bot.kick",
+            "before": None,
+            "after": {"userId": "1"},
+            "ok": True,
+            "origin": "discord",
+            "at": datetime(2026, 9, 20, tzinfo=timezone.utc),
+        }
+    )
+    both = client.get(f"/api/guild/{GUILD}/audit").json()
+    assert both["total"] == 2
+    assert {item["origin"] for item in both["items"]} == {"web", "discord"}
+
+    only_discord = client.get(f"/api/guild/{GUILD}/audit", params={"origin": "discord"}).json()
+    assert only_discord["total"] == 1
+    assert only_discord["items"][0]["action"] == "bot.kick"
+
+    only_web = client.get(f"/api/guild/{GUILD}/audit", params={"origin": "web"}).json()
+    assert only_web["total"] == 1
+    assert only_web["items"][0]["action"] == "settings.patch"
+
+    assert client.get(f"/api/guild/{GUILD}/audit", params={"origin": "bogus"}).status_code == 422
 
 
 def test_write_endpoints_require_login_when_auth_enabled() -> None:

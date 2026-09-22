@@ -117,6 +117,17 @@ def test_discord_error_maps_502_and_audits(monkeypatch: pytest.MonkeyPatch) -> N
     assert audit["action"] == "bot.role"
     assert audit["ok"] is False
     assert audit["after"]["discordStatus"] == 403
+    assert audit["origin"] == "discord"
+
+
+def test_successful_bot_action_audited_with_discord_origin(calls: list[dict]) -> None:
+    client = _client()
+    assert client.post(
+        f"/api/guild/{GUILD}/bot/member/{USER}/roles", json={"roleId": ROLE, "action": "grant"}
+    ).status_code == 200
+    audit = client.app.state.db[mutations.COLL_AUDIT].docs[0]
+    assert audit["origin"] == "discord"
+    assert audit["ok"] is True
 
 
 def test_missing_bot_token_503() -> None:

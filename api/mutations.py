@@ -33,6 +33,7 @@ def record_audit(
     before: Any = None,
     after: Any = None,
     ok: bool = True,
+    origin: str = "web",
 ) -> None:
     db[COLL_AUDIT].insert_one(
         {
@@ -45,6 +46,7 @@ def record_audit(
             "ok": ok,
             "at": _utc_now(),
             "source": "web",
+            "origin": origin,
         }
     )
 
@@ -161,8 +163,10 @@ def mutate_stalker(db: Any, guild_id: str, body: StalkerAction, actor: dict[str,
     return {"ok": True, "subscriptionId": sub_id}
 
 
-def audit_page(db: Any, guild_id: str, page: int, size: int) -> dict[str, Any]:
-    where = {"guildId": guild_id}
+def audit_page(db: Any, guild_id: str, page: int, size: int, origin: str | None = None) -> dict[str, Any]:
+    where: dict[str, Any] = {"guildId": guild_id}
+    if origin:
+        where["origin"] = origin
     total = db[COLL_AUDIT].count_documents(where)
     docs = db[COLL_AUDIT].find(where, sort=[("at", -1)], skip=(page - 1) * size, limit=size)
     return {
@@ -170,6 +174,7 @@ def audit_page(db: Any, guild_id: str, page: int, size: int) -> dict[str, Any]:
         "page": page,
         "size": size,
         "total": int(total),
+        "origin": origin,
         "items": [
             {
                 "actorUserId": doc.get("actorUserId"),
@@ -179,6 +184,7 @@ def audit_page(db: Any, guild_id: str, page: int, size: int) -> dict[str, Any]:
                 "after": doc.get("after"),
                 "ok": doc.get("ok", True),
                 "at": queries._iso(doc.get("at")),
+                "origin": doc.get("origin", "web"),
             }
             for doc in docs
         ],

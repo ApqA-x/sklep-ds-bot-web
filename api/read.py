@@ -131,3 +131,26 @@ def search_members(
 ) -> dict:
     guild = _snowflake(guildId, "guildId")
     return {"guildId": guild, "q": q, "items": queries.search_members(_db(request), guild, q, limit)}
+
+
+@router.get("/names")
+async def guild_names(request: Request, guildId: str) -> dict:
+    guild = _snowflake(guildId, "guildId")
+    from . import discord_api
+
+    cfg = request.app.state.config
+    channels: dict[str, str] = {}
+    roles: dict[str, str] = {}
+    guild_name = None
+    try:
+        channels = await discord_api.guild_channel_names(cfg, guild)
+        roles = await discord_api.guild_role_names(cfg, guild)
+        for entry in await discord_api.bot_guilds(cfg):
+            if str(entry.get("id")) == guild:
+                guild_name = str(entry.get("name") or "")
+                break
+    except discord_api.DiscordError:
+        pass  # without a bot token names fall back to ids in the UI
+    db = getattr(request.app.state, "db", None)
+    users = queries.known_user_names(db, guild) if db is not None else {}
+    return {"guildId": guild, "guildName": guild_name, "channels": channels, "roles": roles, "users": users}

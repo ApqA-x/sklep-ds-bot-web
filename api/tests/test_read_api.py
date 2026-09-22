@@ -12,6 +12,7 @@ from fakes import FakeCollection, FakeDB
 import pytest
 
 GUILD = "170000000000000000"
+USER = "160000000000000000"
 
 
 def _dt(day: int) -> datetime:
@@ -28,6 +29,11 @@ def _client(db: FakeDB | None) -> TestClient:
 def _clear_caches() -> None:
     queries._leaderboard_cache.clear()
     queries._invites_cache.clear()
+    queries._names_cache.clear()
+    from api import discord_api
+
+    discord_api._BOT_GUILD_CACHE.clear()
+    discord_api._GUILD_RESOURCE_CACHE.clear()
 
 
 def test_leaderboard_endpoint() -> None:
@@ -154,3 +160,32 @@ def test_read_endpoints_503_without_db() -> None:
     client = _client(None)
     response = client.get(f"/api/guild/{GUILD}/leaderboard")
     assert response.status_code == 503
+
+
+def test_names_endpoint_without_token_uses_db_users() -> None:
+    db = FakeDB()
+    db[queries.COLL_PARTICIPANTS] = FakeCollection(
+        queries.COLL_PARTICIPANTS,
+        aggregate_results=[[{"_id": USER, "userName": "oldest_name"}, {"_id": "160000000000000001", "userName": "plain"}]],
+    )
+    db[queries.COLL_NICKNAME_STATE] = FakeCollection(
+        queries.COLL_NICKNAME_STATE,
+        docs=[{"guildId": GUILD, "userId": USER, "nickname": "fresh_nick"}, {"guildId": GUILD, "userId": "x", "nickname": ""}],
+    )
+    client = _client(db)
+    response = client.get(f"/api/guild/{GUILD}/names")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["guildId"] == GUILD
+    # без бот-токена каналы/роли/имя гильдии недоступны — пустые словари и null
+    assert body["guildName"] is None
+    assert body["channels"] == {}
+    assert body["roles"] == {}
+    assert body["users"][USER] == "fresh_nick"  # никнейм перекрывает прошлое userName
+    assert body["users"]["160000000000000001"] == "plain"
+    assert "x" not in body["users"]
+
+
+def test_names_endpoint_validation() -> None:
+    client = _client(FakeDB())
+    assert client.get("/api/guild/abc/names").status_code == 422

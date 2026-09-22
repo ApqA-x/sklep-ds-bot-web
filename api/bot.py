@@ -87,6 +87,7 @@ def _finish(request: Request, action: str, arguments: dict[str, Any], status: in
         action=f"bot.{action}",
         after={**arguments, "discordStatus": status, "detail": detail if not ok else None},
         ok=ok,
+        origin="discord",
     )
     if not ok:
         raise HTTPException(status_code=502, detail={"discordStatus": status, "body": detail})

@@ -78,6 +78,7 @@ def get_audit(
     guildId: str,
     page: int = Query(1, ge=1),
     size: int = Query(50, ge=1, le=100),
+    origin: str = Query("", pattern="^(|web|discord)$"),
 ) -> dict:
     guild = _guild(guildId)
-    return mutations.audit_page(_db(request), guild, page, size)
+    return mutations.audit_page(_db(request), guild, page, size, origin or None)

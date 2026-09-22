@@ -12,8 +12,19 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     environment:
-      MONGO_URI: mongodb://mongo:27017
-      MONGO_DB: voice_tracker
+      MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017}
+      MONGO_DB: ${MONGO_DB:-voice_tracker}
+      # для проверки этапа 5 (бот-действия) — пусто = функция выключена
+      DISCORD_TOKEN: ${DISCORD_TOKEN:-}
+      DISCORD_APPLICATION_ID: ${DISCORD_APPLICATION_ID:-}
+      # для проверки этапа 3 (OAuth) — пусто = dev-режим без авторизации
+      DISCORD_CLIENT_ID: ${DISCORD_CLIENT_ID:-}
+      DISCORD_CLIENT_SECRET: ${DISCORD_CLIENT_SECRET:-}
+      DISCORD_REDIRECT_URI: ${DISCORD_REDIRECT_URI:-}
+      WEB_SESSION_SECRET: ${WEB_SESSION_SECRET:-}
+      WEB_PUBLIC_URL: ${WEB_PUBLIC_URL:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       - mongo
 

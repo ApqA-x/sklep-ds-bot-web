@@ -123,11 +123,18 @@ def test_user_profile_endpoint_404_and_ok() -> None:
             [{"_id": None, "totalMs": 7, "appearances": 1}],
             [{"_id": "2026-09-09", "ms": 7}],
         ])
+    db[queries.COLL_CHAT] = FakeCollection(queries.COLL_CHAT, docs=[
+        {"guildId": GUILD, "authorUserId": user, "sentAt": _dt(9)},
+        {"guildId": GUILD, "authorUserId": user, "sentAt": _dt(8)},
+        {"guildId": GUILD, "authorUserId": "999", "sentAt": _dt(9)},
+        {"guildId": "999", "authorUserId": user, "sentAt": _dt(9)},
+    ])
     response = client.get(f"/api/guild/{GUILD}/users/{user}", params={"period": "all"})
     assert response.status_code == 200
     body = response.json()
     assert body["totalMs"] == 7
     assert body["daily"] == [{"date": "2026-09-09", "ms": 7}]
+    assert body["messageCount"] == 2
 
 
 def test_invites_endpoint() -> None:

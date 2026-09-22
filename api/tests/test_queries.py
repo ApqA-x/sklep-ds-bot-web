@@ -192,6 +192,13 @@ def test_user_profile_none_for_unknown_and_full_for_known() -> None:
     db[queries.COLL_JOIN_STATE] = FakeCollection(queries.COLL_JOIN_STATE,
         docs=[{"guildId": "1", "userId": "42", "inviteCode": "abc", "inviteType": "regular",
                "inviterUserId": "7", "inviterName": "Inv", "attributionStatus": "exact", "joinedAt": _dt(1)}])
+    db[queries.COLL_CHAT] = FakeCollection(queries.COLL_CHAT, docs=[
+        {"guildId": "1", "authorUserId": "42", "sentAt": _dt(9)},
+        {"guildId": "1", "authorUserId": "42", "sentAt": _dt(8)},
+        {"guildId": "1", "authorUserId": "42", "sentAt": _dt(1, 1)},
+        {"guildId": "1", "authorUserId": "43", "sentAt": _dt(9)},
+        {"guildId": "2", "authorUserId": "42", "sentAt": _dt(9)},
+    ])
 
     profile = queries.user_profile(db, "1", "42", "30d")
     assert profile is not None
@@ -203,6 +210,9 @@ def test_user_profile_none_for_unknown_and_full_for_known() -> None:
     assert profile["nicknames"][0]["changedAt"] == "2026-09-08T00:00:00Z"
     assert profile["join"]["inviterName"] == "Inv"
     assert profile["join"]["joinedAt"] == "2026-09-01T00:00:00Z"
+
+    profile_all = queries.user_profile(db, "1", "42", "all")
+    assert profile_all is not None and profile_all["messageCount"] == 3
 
 
 def test_invites_overview_sections_and_cache() -> None:

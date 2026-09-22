@@ -335,6 +335,10 @@ def user_profile(db: Any, guild_id: str, user_id: str, period: str) -> dict | No
     known = name_doc is not None or role_state is not None or join_state is not None
     if not known:
         return None
+    msg_where: dict[str, Any] = {"guildId": guild_id, "authorUserId": user_id}
+    if cutoff is not None:
+        msg_where["sentAt"] = {"$gte": cutoff}
+    message_count = int(db[COLL_CHAT].count_documents(msg_where))
     return {
         "guildId": guild_id,
         "userId": user_id,
@@ -342,6 +346,7 @@ def user_profile(db: Any, guild_id: str, user_id: str, period: str) -> dict | No
         "period": period,
         "totalMs": int(totals.get("totalMs") or 0),
         "appearances": int(totals.get("appearances") or 0),
+        "messageCount": message_count,
         "daily": daily,
         "roleIds": [str(r) for r in (role_state or {}).get("roleIds") or []],
         "nicknames": nicknames,

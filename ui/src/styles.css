@@ -112,13 +112,19 @@ select {
   font: inherit;
 }
 
-button:hover:not(:disabled) {
-  border-color: var(--surface2);
-  background: var(--surface0);
-}
-
 button {
   cursor: pointer;
+}
+
+button,
+select {
+  transition: transform 120ms ease, background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+button:hover:not(:disabled) {
+  transform: scale(1.045);
+  border-color: var(--surface2);
+  background: color-mix(in srgb, var(--surface0) 72%, black);
 }
 
 button:disabled {
@@ -152,6 +158,109 @@ button:disabled {
   background: var(--mauve);
   border-color: var(--mauve);
   color: var(--crust);
+}
+
+.chip:hover:not(:disabled) {
+  transform: scale(1.06);
+  background: color-mix(in srgb, var(--surface0) 72%, black);
+  border-color: var(--surface2);
+}
+
+.chip.active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--mauve) 78%, black);
+  border-color: color-mix(in srgb, var(--mauve) 78%, black);
+  color: var(--crust);
+}
+
+/* кнопка порядка дат в чате: остаётся в тулбаре, но визуально — акцентная */
+.sort-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 999px;
+  padding: 0.25rem 0.9rem;
+  background: var(--surface1);
+  border-color: var(--surface2);
+  color: var(--subtext1);
+  font-weight: 600;
+}
+
+.sort-toggle .sort-arrow {
+  color: var(--mauve);
+  font-weight: 700;
+}
+
+.sort-toggle:hover:not(:disabled) {
+  transform: scale(1.06);
+  background: color-mix(in srgb, var(--surface1) 70%, black);
+  border-color: var(--mauve);
+  color: var(--text);
+}
+
+.tabs {
+  display: flex;
+  gap: 0.3rem;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 0.9rem;
+}
+
+.tab {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  padding: 0.45rem 0.9rem;
+  color: var(--subtext0);
+  font-weight: 600;
+}
+
+.tab:hover:not(:disabled) {
+  transform: none;
+  background: color-mix(in srgb, var(--surface0) 72%, black);
+  color: var(--text);
+  border-color: var(--surface2);
+}
+
+.tab.active {
+  color: var(--text);
+  background: var(--surface0);
+  border-bottom-color: var(--mauve);
+}
+
+.tab.active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--surface0) 72%, black);
+}
+
+.tab .count-badge {
+  display: inline-block;
+  margin-left: 0.35rem;
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  background: var(--mauve);
+  color: var(--crust);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.filters-panel {
+  padding: 0.2rem 0 0.4rem;
+}
+
+.filter-block {
+  margin-bottom: 1rem;
+}
+
+.filter-block h4 {
+  margin: 0 0 0.4rem;
+  font-size: 0.85rem;
+  color: var(--subtext0);
+}
+
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
 }
 
 .chips {

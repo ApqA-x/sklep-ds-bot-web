@@ -104,6 +104,7 @@ export type UserProfile = {
   period: Period;
   totalMs: number;
   appearances: number;
+  messageCount: number;
   daily: DailyUsage[];
   roleIds: string[];
   nicknames: NicknameChange[];

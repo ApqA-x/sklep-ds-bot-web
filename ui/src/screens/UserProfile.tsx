@@ -73,7 +73,8 @@ export default function UserProfile() {
           <a href={discordUserUrl(p.userId)} target="_blank" rel="noreferrer">
             {p.userId}
           </a>{" "}
-          · заходов за период: {p.appearances} · время: {fmtDuration(p.totalMs)}
+          · заходов за период: {p.appearances} · время: {fmtDuration(p.totalMs)} · сообщений:{" "}
+          {p.messageCount.toLocaleString("ru-RU")}
         </p>
         {daily.length > 0 && (
           <div className="chart">

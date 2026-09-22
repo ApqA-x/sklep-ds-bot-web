@@ -97,26 +97,94 @@ async def bot_guilds(cfg: WebConfig) -> list[dict[str, Any]]:
     return guilds
 
 
-async def _cached_guild_resource(cfg: WebConfig, guild_id: str, kind: str) -> dict[str, str]:
+async def _guild_resource_rows(cfg: WebConfig, guild_id: str, kind: str) -> list[dict[str, Any]]:
     key = (guild_id, kind)
     cached = _GUILD_RESOURCE_CACHE.get(key)
     if cached is not None and time.monotonic() - cached[0] < _GUILD_RESOURCE_TTL:
         return cached[1]
     if not cfg.discord_token:
-        return {}
+        return []
     headers = {"Authorization": f"Bot {cfg.discord_token}"}
     rows = await _get_json(f"{API}/guilds/{guild_id}/{kind}", headers, op=kind) or []
-    names = {str(row["id"]): str(row.get("name") or "") for row in rows if row.get("id")}
-    _GUILD_RESOURCE_CACHE[key] = (time.monotonic(), names)
-    return names
+    _GUILD_RESOURCE_CACHE[key] = (time.monotonic(), rows)
+    return rows
+
+
+def _rows_to_names(rows: list[dict[str, Any]]) -> dict[str, str]:
+    return {str(row["id"]): str(row.get("name") or "") for row in rows if row.get("id")}
 
 
 async def guild_channel_names(cfg: WebConfig, guild_id: str) -> dict[str, str]:
-    return await _cached_guild_resource(cfg, guild_id, "channels")
+    return _rows_to_names(await _guild_resource_rows(cfg, guild_id, "channels"))
 
 
 async def guild_role_names(cfg: WebConfig, guild_id: str) -> dict[str, str]:
-    return await _cached_guild_resource(cfg, guild_id, "roles")
+    return _rows_to_names(await _guild_resource_rows(cfg, guild_id, "roles"))
+
+
+async def guild_roles_raw(cfg: WebConfig, guild_id: str) -> list[dict[str, Any]]:
+    return await _guild_resource_rows(cfg, guild_id, "roles")
+
+
+async def guild_channels_raw(cfg: WebConfig, guild_id: str) -> list[dict[str, Any]]:
+    return await _guild_resource_rows(cfg, guild_id, "channels")
+
+
+async def bot_top_role_position(cfg: WebConfig, guild_id: str) -> int | None:
+    """Position of the bot's highest role in a guild, or None when no bot token."""
+    if not cfg.discord_token:
+        return None
+    key = (guild_id, "topRolePosition")
+    cached = _GUILD_RESOURCE_CACHE.get(key)
+    if cached is not None and time.monotonic() - cached[0] < _GUILD_RESOURCE_TTL:
+        return cached[1]
+    headers = {"Authorization": f"Bot {cfg.discord_token}"}
+    member = await _get_json(f"{API}/guilds/{guild_id}/members/@me", headers, op="bot_member")
+    bot_role_ids = {str(rid) for rid in member.get("roles", [])}
+    rows = await _guild_resource_rows(cfg, guild_id, "roles")
+    top = max((int(row.get("position") or 0) for row in rows if str(row.get("id")) in bot_role_ids), default=0)
+    _GUILD_RESOURCE_CACHE[key] = (time.monotonic(), top)
+    return top
+
+
+def build_role_options(
+    rows: list[dict[str, Any]], guild_id: str, bot_top_position: int | None
+) -> list[dict[str, Any]]:
+    """Assignable-role picker list: no @everyone, no managed roles, below the bot's top role."""
+    out: list[dict[str, Any]] = []
+    for row in sorted(rows, key=lambda r: int(r.get("position") or 0), reverse=True):
+        rid = str(row.get("id") or "")
+        if rid == "" or rid == str(guild_id):
+            continue
+        managed = bool(row.get("managed") or row.get("tags"))
+        position = int(row.get("position") or 0)
+        assignable = not managed and (bot_top_position is None or position < bot_top_position)
+        out.append(
+            {
+                "id": rid,
+                "name": str(row.get("name") or rid),
+                "color": int(row.get("color") or 0),
+                "position": position,
+                "managed": managed,
+                "assignable": assignable,
+            }
+        )
+    return out
+
+
+VOICE_CHANNEL_TYPES = (2, 13)
+
+
+def build_voice_channels(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for row in sorted(rows, key=lambda r: (int(r.get("position") or 0), str(r.get("id") or ""))):
+        if int(row.get("type") or 0) not in VOICE_CHANNEL_TYPES:
+            continue
+        cid = str(row.get("id") or "")
+        if cid == "":
+            continue
+        out.append({"id": cid, "name": str(row.get("name") or cid), "type": int(row.get("type"))})
+    return out
 
 
 async def member_permissions(cfg: WebConfig, guild_id: str, user_id: str) -> int | None:

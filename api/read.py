@@ -160,6 +160,25 @@ def chat_messages(
     return queries.chat_messages(_db(request), guild, channelId, before_dt, limit)
 
 
+@router.get("/picker")
+async def guild_picker(request: Request, guildId: str) -> dict:
+    guild = _snowflake(guildId, "guildId")
+    from . import discord_api
+
+    cfg = request.app.state.config
+    roles: list[dict] = []
+    channels: list[dict] = []
+    try:
+        role_rows = await discord_api.guild_roles_raw(cfg, guild)
+        channel_rows = await discord_api.guild_channels_raw(cfg, guild)
+        top_position = await discord_api.bot_top_role_position(cfg, guild)
+        roles = discord_api.build_role_options(role_rows, guild, top_position)
+        channels = discord_api.build_voice_channels(channel_rows)
+    except discord_api.DiscordError:
+        pass  # без бот-токена списки пустые — UI покажет ручной ввод id
+    return {"guildId": guild, "roles": roles, "voiceChannels": channels}
+
+
 @router.get("/names")
 async def guild_names(request: Request, guildId: str) -> dict:
     guild = _snowflake(guildId, "guildId")

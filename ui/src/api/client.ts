@@ -12,6 +12,7 @@ import type {
   MemberHit,
   NamesPayload,
   Period,
+  PickerPayload,
   SessionDetail,
   SessionPage,
   StalkerSubscription,
@@ -118,6 +119,8 @@ export const api = {
     }),
 
   names: (guildId: string) => apiGet<NamesPayload>(`/api/guild/${guildId}/names`),
+
+  picker: (guildId: string) => apiGet<PickerPayload>(`/api/guild/${guildId}/picker`),
 
   chatChannels: (guildId: string) =>
     apiGet<{ guildId: string; items: ChatChannel[] }>(`/api/guild/${guildId}/chat/channels`),

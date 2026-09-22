@@ -191,6 +191,54 @@ def test_names_endpoint_validation() -> None:
     assert client.get("/api/guild/abc/names").status_code == 422
 
 
+def test_picker_endpoint_without_token_returns_empty_lists() -> None:
+    client = _client(FakeDB())
+    response = client.get(f"/api/guild/{GUILD}/picker")
+    assert response.status_code == 200
+    body = response.json()
+    assert body == {"guildId": GUILD, "roles": [], "voiceChannels": []}
+    assert client.get("/api/guild/abc/picker").status_code == 422
+
+
+def test_build_role_options_rules() -> None:
+    from api import discord_api
+
+    rows = [
+        {"id": GUILD, "name": "@everyone", "position": 0, "color": 0},
+        {"id": "1", "name": "Admin", "position": 10, "color": 0xF38BA8},
+        {"id": "2", "name": "Mod", "position": 5, "color": 0xA6E3A1},
+        {"id": "3", "name": "Bot Role", "position": 8, "color": 0, "managed": True},
+        {"id": "4", "name": "Boost", "position": 7, "color": 0xF9E2AF, "tags": {"boost": True}},
+    ]
+    options = discord_api.build_role_options(rows, GUILD, bot_top_position=6)
+    ids = [o["id"] for o in options]
+    assert ids == ["1", "3", "4", "2", GUILD][:4]  # @everyone исключён; остальные по position desc
+    by_id = {o["id"]: o for o in options}
+    assert by_id["1"]["assignable"] is False  # выше топ-роли бота
+    assert by_id["2"]["assignable"] is True
+    assert by_id["3"]["assignable"] is False  # managed
+    assert by_id["4"]["assignable"] is False  # tags (интеграция)
+    assert by_id["2"]["color"] == 0xA6E3A1
+
+    # без информации о позиции бота (нет токена) — не фильтруем по иерархии
+    options_no_top = discord_api.build_role_options(rows, GUILD, None)
+    assert {o["id"]: o["assignable"] for o in options_no_top} == {"1": True, "2": True, "3": False, "4": False}
+
+
+def test_build_voice_channels_only_voice_types() -> None:
+    from api import discord_api
+
+    rows = [
+        {"id": "10", "name": "General", "type": 0, "position": 0},
+        {"id": "11", "name": "Лобби", "type": 2, "position": 2},
+        {"id": "12", "name": "Музыка", "type": 2, "position": 1},
+        {"id": "13", "name": "Ивент", "type": 13, "position": 3},
+        {"id": "14", "name": "Категория", "type": 4, "position": 4},
+    ]
+    channels = discord_api.build_voice_channels(rows)
+    assert [c["id"] for c in channels] == ["12", "11", "13"]
+
+
 def _chat_db() -> FakeDB:
     db = FakeDB()
     channel = "140000000000000000"

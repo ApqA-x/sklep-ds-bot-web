@@ -12,9 +12,9 @@ import {
 } from "recharts";
 import { api, useCanWrite } from "../api/client";
 import type { Period } from "../api/types";
-import { Empty, ErrorBox, Loading, Section } from "../components/ui";
+import { Empty, ErrorBox, Loading, OptionSelect, roleColorCss, Section, type PickerOption } from "../components/ui";
 import { discordUserUrl, fmtDate, fmtDuration } from "../lib/format";
-import { DName } from "../names";
+import { DName, usePicker } from "../names";
 
 const PERIODS: Period[] = ["7d", "30d", "all"];
 
@@ -26,6 +26,7 @@ export default function UserProfile() {
     queryKey: ["user", guildId, userId, period],
     queryFn: () => api.userProfile(guildId, userId, period),
   });
+  const picker = usePicker(guildId);
 
   if (query.isLoading) return <Loading />;
   if (query.isError) return <ErrorBox error={query.error} />;
@@ -111,23 +112,29 @@ export default function UserProfile() {
       </Section>
       <Section title={`Роли (${p.roleIds.length})`}>
         <div className="chips">
-          {p.roleIds.map((r) => (
-            <span className="chip" key={r} title={r}>
-              <DName kind="role" id={r} />
-            </span>
-          ))}
+          {p.roleIds.map((r) => {
+            const meta = picker.data?.roles.find((x) => x.id === r);
+            const color = roleColorCss(meta?.color);
+            return (
+              <span className="chip role-chip" key={r} title={r}>
+                {color && <span className="opt-dot" style={{ background: color }} />}
+                <DName kind="role" id={r} />
+              </span>
+            );
+          })}
         </div>
       </Section>
-      {canWrite && <ActionPanel guildId={guildId} userId={userId} />}
+      {canWrite && <ActionPanel guildId={guildId} userId={userId} roleIds={p.roleIds} />}
     </>
   );
 }
 
-function ActionPanel({ guildId, userId }: { guildId: string; userId: string }) {
+function ActionPanel({ guildId, userId, roleIds }: { guildId: string; userId: string; roleIds: string[] }) {
   const [roleId, setRoleId] = useState("");
   const [channelId, setChannelId] = useState("");
   const [reason, setReason] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
+  const picker = usePicker(guildId);
   const queryClient = useQueryClient();
 
   const run = useMutation({
@@ -159,16 +166,43 @@ function ActionPanel({ guildId, userId }: { guildId: string; userId: string }) {
   const busy = run.isPending;
   const isId = (v: string) => /^\d{5,25}$/.test(v);
 
+  const held = new Set(roleIds);
+  const roles = picker.data?.roles ?? [];
+  const channels = picker.data?.voiceChannels ?? [];
+  const roleOptions: PickerOption[] = roles.map((r) => ({
+    id: r.id,
+    name: r.name,
+    color: r.color,
+    note: !r.assignable ? "неуправляема" : held.has(r.id) ? "есть" : undefined,
+    disabled: !r.assignable,
+  }));
+  const channelOptions: PickerOption[] = channels.map((c) => ({
+    id: c.id,
+    name: c.name,
+    note: c.type === 13 ? "stage" : undefined,
+  }));
+  const selectedRole = roles.find((r) => r.id === roleId);
+
   return (
     <Section title="Действия от имени бота">
       {notice && <p className="hint">{notice}</p>}
       <div className="actions-grid">
         <div className="action">
-          <input value={roleId} onChange={(e) => setRoleId(e.target.value)} placeholder="role id" />
-          <button disabled={busy || !isId(roleId)} onClick={() => run.mutate({ kind: "grant" })}>
+          {roleOptions.length > 0 ? (
+            <OptionSelect placeholder="выбери роль" options={roleOptions} value={roleId} onChange={setRoleId} disabled={busy} />
+          ) : (
+            <input value={roleId} onChange={(e) => setRoleId(e.target.value)} placeholder="role id" />
+          )}
+          <button
+            disabled={busy || (!isId(roleId) && !selectedRole) || (selectedRole ? !selectedRole.assignable || held.has(roleId) : false)}
+            onClick={() => run.mutate({ kind: "grant" })}
+          >
             выдать роль
           </button>
-          <button disabled={busy || !isId(roleId)} onClick={() => run.mutate({ kind: "revoke" })}>
+          <button
+            disabled={busy || (!isId(roleId) && !selectedRole) || (selectedRole ? !selectedRole.assignable || !held.has(roleId) : false)}
+            onClick={() => run.mutate({ kind: "revoke" })}
+          >
             снять роль
           </button>
         </div>
@@ -181,7 +215,17 @@ function ActionPanel({ guildId, userId }: { guildId: string; userId: string }) {
           </button>
         </div>
         <div className="action">
-          <input value={channelId} onChange={(e) => setChannelId(e.target.value)} placeholder="voice channel id" />
+          {channelOptions.length > 0 ? (
+            <OptionSelect
+              placeholder="выбери голосовой канал"
+              options={channelOptions}
+              value={channelId}
+              onChange={setChannelId}
+              disabled={busy}
+            />
+          ) : (
+            <input value={channelId} onChange={(e) => setChannelId(e.target.value)} placeholder="voice channel id" />
+          )}
           <button disabled={busy || !isId(channelId)} onClick={() => run.mutate({ kind: "move" })}>
             переместить
           </button>

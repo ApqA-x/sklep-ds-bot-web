@@ -12,6 +12,14 @@ export function useNames(guildId: string | undefined) {
   });
 }
 
+export function usePicker(guildId: string) {
+  return useQuery({
+    queryKey: ["picker", guildId],
+    queryFn: () => api.picker(guildId),
+    staleTime: 300_000,
+  });
+}
+
 export type NameKind = "user" | "channel" | "role" | "guild";
 
 export function nameOf(names: NamesPayload | undefined, kind: NameKind, id: string): string {

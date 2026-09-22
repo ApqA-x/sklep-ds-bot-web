@@ -181,6 +181,27 @@ export type NamesPayload = {
   users: Record<string, string>;
 };
 
+export type RoleOption = {
+  id: string;
+  name: string;
+  color: number;
+  position: number;
+  managed: boolean;
+  assignable: boolean;
+};
+
+export type VoiceChannelOption = {
+  id: string;
+  name: string;
+  type: number;
+};
+
+export type PickerPayload = {
+  guildId: string;
+  roles: RoleOption[];
+  voiceChannels: VoiceChannelOption[];
+};
+
 export type ChatChannel = {
   channelId: string;
   count: number;

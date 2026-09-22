@@ -1,0 +1,21 @@
+services:
+  mongo:
+    image: mongo:7
+    # локальный Windows-mongod занимает 27017 — наружу публикуем 27018
+    ports:
+      - "127.0.0.1:27018:27017"
+    volumes:
+      - mongo-data:/data/db
+
+  web:
+    build: .
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      MONGO_DB: voice_tracker
+    depends_on:
+      - mongo
+
+volumes:
+  mongo-data:

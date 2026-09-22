@@ -34,18 +34,6 @@ curl http://127.0.0.1:8000/api/healthz
 MONGO_URI=mongodb://host.docker.internal:27017 docker compose up -d --no-deps --build web
 ```
 
-Картинки чата (`/media`): web читает external volume `dsbot-media`, куда бот
-(dsbot-gateway) пишет скачанные вложения. Один раз на хосте до `up`:
-
-
-```bash
-docker volume create dsbot-media
-```
-
-`MEDIA_DIR` пусто — раздача `/media` выключена, UI показывает ссылки Discord.
-Отдельный Nginx перед `/media` не обязателен: пути содержат sha256 содержимого
-и не угадываются извне.
-
 Без Docker (dev):
 
 ```bash
@@ -55,6 +43,20 @@ uvicorn api.main:app --reload --port 8000
 # UI (отдельный терминал; vite проксирует /api на :8000)
 cd ui && npm ci && npm run dev
 ```
+
+## Картинки чата (`/media`)
+
+Web читает external volume `dsbot-media`, куда бот (dsbot-gateway, rw) скачивает
+новые картинки-вложения ≤20 МБ в `<guildId>/<YYYY-MM>/<sha256>.<ext>`; метаданные —
+в `chat_messages.attachments`. Один раз на хосте до `up`:
+
+```bash
+docker volume create dsbot-media
+```
+
+`MEDIA_DIR` пусто — раздача `/media` выключена, UI показывает ссылки Discord.
+Отдельный Nginx перед `/media` не обязателен: пути содержат sha256 содержимого
+и не угадываются извне.
 
 ## Тесты
 
@@ -100,21 +102,23 @@ workflow `publish.yml` соберёт `ghcr.io/apqa-x/sklep-ds-bot-web:0.1.0` (+
 | 5. Discord-действия | ✅ (`api/bot.py`: роли/timeout/move/kick/сообщение/инвайты, rate-limit, audit) |
 | 6. UI управления | ✅ (форма настроек, списки trusted/autoUnmute/stalker, панель действий, страница аудита) |
 | 6b. UI-правки 2026-09-22 | ✅ (Catppuccin Mocha; имена вместо id через `GET /names`; `origin` web/discord в аудите + фильтр; экран «Чат» — см. ниже) |
+| 6c. Аудит-правки + фото 2026-09-22 | ✅ (`a4918d8`, `01756cc`: читаемые «Детали» аудита, фильтры аудита (над кем/действие/статус/период/сортировка) и чата (канал/автор/тип/период/сортировка), пагинация лидерборда по 50 + клик по графику → профиль, подсказки команд и сетка каналов в настройках, хранение картинок чата — см. «Картинки чата» выше) |
 | 7. Прод | ⬜ требуется на хосте: OAuth env, reverse proxy, `docker stack deploy` (чеклист ниже) |
 
 > **История чата**: экран и read-API (`GET /chat/channels`, `GET /chat`) готовы и читают коллекцию
 > `chat_messages` (в базе бота). Writer добавлен в живой `dsbot-gateway` (`D:\dsbot`:
 > `voice_tracker/repository.py` + `services/gateway.py`, на момент 2026-09-22 — не закоммичен в
-> тот репозиторий): обычные сообщения, правки и удаления пишутся с фильтром по гильдиям из конфига.
-> До его перезапуска сообщения не сохранялись, поэтому страница «Чат» пустая (в UI есть заглушка).
+> тот репозиторий): обычные сообщения, правки и удаления пишутся с фильтром по гильдиям из конфига;
+> новые картинки-вложения дополнительно скачиваются в `dsbot-media` (см. «Картинки чата»).
 
 ## Чеклист прода-выката (этап 7, выполняется на Swarm-хосте)
 
 1. Discord Developer Portal: у приложения включить OAuth2, redirect URI `https://<домен>/api/auth/callback`, скопировать client id/secret.
 2. В `bot/.env` добавить: `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`, `WEB_SESSION_SECRET` (32+ случайных байт, например `openssl rand -hex 32`), `WEB_PUBLIC_URL`.
 3. Запушить тег образа и заменить `:latest` на `v*` в `bot/docker-stack.yaml`: `image: ghcr.io/apqa-x/sklep-ds-bot-web:v0.1.0`.
-4. Reverse proxy (Caddy/nginx/Traefik): TLS для `<домен>` → `web:8000` (сеть оверлея). Наружу публикация порта **не** нужна.
-5. `docker stack deploy -c docker-stack.yaml bot`.
-6. Проверка: `curl https://<домен>/api/healthz` → `status: ok`; вход через Discord; сервер виден только если пользователь в нём и имеет Manage Guild.
+4. Картинки чата (опционально): на хосте `docker volume create dsbot-media`; в стеке — `MEDIA_DIR=/data/media` + монтирование тома gateway (rw) и web (ro). Без этого `/media` выключен, UI отдаёт ссылки Discord.
+5. Reverse proxy (Caddy/nginx/Traefik): TLS для `<домен>` → `web:8000` (сеть оверлея). Наружу публикация порта **не** нужна.
+6. `docker stack deploy -c docker-stack.yaml bot`.
+7. Проверка: `curl https://<домен>/api/healthz` → `status: ok`; вход через Discord; сервер виден только если пользователь в нём и имеет Manage Guild.
 
 Пока `DISCORD_CLIENT_*`/`WEB_SESSION_SECRET` не заданы, сайт работает в dev-режиме (без авторизации) — в проде не публиковать порт наружу до шага 2.

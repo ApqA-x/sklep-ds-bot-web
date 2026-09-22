@@ -107,7 +107,6 @@ async def auth_login(request: Request):
         "&scope=identify%20guilds"
         f"&redirect_uri={quote(_redirect_uri(cfg, request), safe='')}"
         f"&state={quote(state, safe='')}"
-        "&prompt=none"
     )
     response = RedirectResponse(url, status_code=302)
     response.set_cookie(

@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDate, fmtDuration } from "../lib/format";
+import { nameOf, useNames } from "../names";
 
 export default function SessionDetail() {
   const { guildId = "", sessionId = "" } = useParams();
@@ -10,15 +11,17 @@ export default function SessionDetail() {
     queryKey: ["session", guildId, sessionId],
     queryFn: () => api.sessionDetail(guildId, sessionId),
   });
+  const names = useNames(guildId);
 
   if (query.isLoading) return <Loading />;
   if (query.isError) return <ErrorBox error={query.error} />;
 
   const s = query.data;
   if (!s) return null;
+  const channelName = nameOf(names.data, "channel", s.channelId);
   return (
     <>
-      <Section title={`Сессия на канале ${s.channelId}`}>
+      <Section title={`Сессия на канале ${channelName}`}>
         <dl className="kv">
           <dt>Статус</dt>
           <dd>{s.status}</dd>

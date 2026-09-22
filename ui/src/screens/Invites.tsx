@@ -14,6 +14,7 @@ import { api } from "../api/client";
 import type { Period } from "../api/types";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDate } from "../lib/format";
+import { DName } from "../names";
 
 const PERIODS: Period[] = ["7d", "30d", "all"];
 
@@ -50,7 +51,7 @@ export default function Invites() {
                 <XAxis dataKey="userName" interval={0} angle={-20} height={50} textAnchor="end" />
                 <YAxis allowDecimals={false} />
                 <Tooltip />
-                <Bar dataKey="count" fill="#57f287" />
+                <Bar dataKey="count" fill="#a6e3a1" />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -76,7 +77,9 @@ export default function Invites() {
                 <tr key={`${a.userId}-${a.joinedAt}`}>
                   <td>{fmtDate(a.joinedAt)}</td>
                   <td>
-                    <Link to={`/g/${guildId}/users/${a.userId}`}>{a.userId}</Link>
+                    <Link to={`/g/${guildId}/users/${a.userId}`}>
+                      <DName kind="user" id={a.userId} />
+                    </Link>
                   </td>
                   <td>{a.inviteCode ?? "—"}</td>
                   <td>{a.inviterName ?? "—"}</td>
@@ -104,7 +107,7 @@ export default function Invites() {
             {data.catalog.map((c) => (
               <tr key={c.code}>
                 <td>{c.code}</td>
-                <td>{c.channelId}</td>
+                <td><DName kind="channel" id={c.channelId} /></td>
                 <td>{c.createdByName ?? "—"}</td>
                 <td>{fmtDate(c.createdAt)}</td>
                 <td>{c.deletedAt ? fmtDate(c.deletedAt) : "активен"}</td>

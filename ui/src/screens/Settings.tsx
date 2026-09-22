@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { api, useCanWrite } from "../api/client";
 import { ErrorBox, Loading, Section } from "../components/ui";
+import { DName, type NameKind } from "../names";
 
 const ACTIVITY_EVENT_TYPES = [
   "member_join",
@@ -37,6 +38,17 @@ function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
 }
 
+function NameHint({ kind, value }: { kind: NameKind; value: unknown }) {
+  const id = String(value ?? "");
+  if (!/^\d{5,25}$/.test(id)) return null;
+  return (
+    <span className="muted">
+      {" "}
+      → <DName kind={kind} id={id} />
+    </span>
+  );
+}
+
 function normalize(value: unknown): unknown {
   if (value === undefined || value === null) return "";
   return value;
@@ -44,6 +56,7 @@ function normalize(value: unknown): unknown {
 
 function IdList({
   title,
+  kind,
   ids,
   disabled,
   onAdd,
@@ -51,6 +64,7 @@ function IdList({
   busy,
 }: {
   title: string;
+  kind: NameKind;
   ids: string[];
   disabled: boolean;
   onAdd: (id: string) => void;
@@ -87,8 +101,8 @@ function IdList({
       <div className="chips">
         {ids.length === 0 && <span className="muted">пусто</span>}
         {ids.map((id) => (
-          <span className="chip" key={id}>
-            {id}
+          <span className="chip" key={id} title={id}>
+            <DName kind={kind} id={id} />
             {!disabled && (
               <button type="button" onClick={() => onRemove(id)} disabled={busy} aria-label={`удалить ${id}`}>
                 ×
@@ -199,6 +213,7 @@ export default function Settings() {
         {form.trackingMode === "specific" && (
           <IdList
             title="Трекаемые каналы"
+            kind="channel"
             ids={trackedChannels}
             disabled={!canWrite}
             busy={patch.isPending}
@@ -213,6 +228,7 @@ export default function Settings() {
             disabled={!canWrite}
             onChange={(e) => set("summaryChannelId", e.target.value)}
           />
+          <NameHint kind="channel" value={form.summaryChannelId} />
         </label>
         <label className="field">
           <span>fallbackSummaryChannelId</span>
@@ -221,6 +237,7 @@ export default function Settings() {
             disabled={!canWrite}
             onChange={(e) => set("fallbackSummaryChannelId", e.target.value)}
           />
+          <NameHint kind="channel" value={form.fallbackSummaryChannelId} />
         </label>
       </Section>
       <Section title="Activity-карточки">
@@ -231,6 +248,7 @@ export default function Settings() {
             disabled={!canWrite}
             onChange={(e) => set("activityChannelId", e.target.value)}
           />
+          <NameHint kind="channel" value={form.activityChannelId} />
         </label>
         <div className="events-grid">
           {ACTIVITY_EVENT_TYPES.map((t) => (
@@ -270,11 +288,13 @@ export default function Settings() {
             disabled={!canWrite}
             onChange={(e) => set("autoRoleId", e.target.value)}
           />
+          <NameHint kind="role" value={form.autoRoleId} />
         </label>
       </Section>
       <Section title="Списки">
         <IdList
           title="Trusted"
+          kind="user"
           ids={trustedIds}
           disabled={!canWrite}
           busy={listAction.isPending}
@@ -283,6 +303,7 @@ export default function Settings() {
         />
         <IdList
           title="Auto-unmute"
+          kind="user"
           ids={unmuteIds}
           disabled={!canWrite}
           busy={listAction.isPending}
@@ -304,8 +325,12 @@ export default function Settings() {
             <tbody>
               {(stalkerList.data?.items ?? []).map((s) => (
                 <tr key={s.id}>
-                  <td>{s.watcherUserId}</td>
-                  <td>{s.targetUserId}</td>
+                  <td title={s.watcherUserId}>
+                    <DName kind="user" id={s.watcherUserId} />
+                  </td>
+                  <td title={s.targetUserId}>
+                    <DName kind="user" id={s.targetUserId} />
+                  </td>
                   <td>{s.createdAt?.slice(0, 10) ?? "—"}</td>
                   <td>
                     <button

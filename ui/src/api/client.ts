@@ -8,6 +8,7 @@ import type {
   InvitesOverview,
   Leaderboard,
   MemberHit,
+  NamesPayload,
   Period,
   SessionDetail,
   SessionPage,
@@ -114,8 +115,12 @@ export const api = {
       action,
     }),
 
-  audit: (guildId: string, page = 1, size = 50) =>
-    apiGet<AuditPage>(`/api/guild/${guildId}/audit?page=${page}&size=${size}`),
+  names: (guildId: string) => apiGet<NamesPayload>(`/api/guild/${guildId}/names`),
+
+  audit: (guildId: string, page = 1, size = 50, origin?: "web" | "discord") =>
+    apiGet<AuditPage>(
+      `/api/guild/${guildId}/audit?page=${page}&size=${size}${origin ? `&origin=${origin}` : ""}`,
+    ),
 
   botRole: (guildId: string, userId: string, roleId: string, action: "grant" | "revoke") =>
     apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/member/${userId}/roles`, { roleId, action }),

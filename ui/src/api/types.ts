@@ -161,6 +161,7 @@ export type AuditItem = {
   after: unknown;
   ok: boolean;
   at: string;
+  origin?: "web" | "discord";
 };
 
 export type AuditPage = {
@@ -168,7 +169,16 @@ export type AuditPage = {
   page: number;
   size: number;
   total: number;
+  origin?: string | null;
   items: AuditItem[];
+};
+
+export type NamesPayload = {
+  guildId: string;
+  guildName: string | null;
+  channels: Record<string, string>;
+  roles: Record<string, string>;
+  users: Record<string, string>;
 };
 
 export type GuildAccess = {

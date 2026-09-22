@@ -14,6 +14,7 @@ import { api, useCanWrite } from "../api/client";
 import type { Period } from "../api/types";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
 import { discordUserUrl, fmtDate, fmtDuration } from "../lib/format";
+import { DName } from "../names";
 
 const PERIODS: Period[] = ["7d", "30d", "all"];
 
@@ -60,7 +61,7 @@ export default function UserProfile() {
                 <XAxis dataKey="date" />
                 <YAxis />
                 <Tooltip />
-                <Line type="monotone" dataKey="hours" stroke="#5865f2" dot={false} />
+                <Line type="monotone" dataKey="hours" stroke="#cba6f7" dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -111,8 +112,8 @@ export default function UserProfile() {
       <Section title={`Роли (${p.roleIds.length})`}>
         <div className="chips">
           {p.roleIds.map((r) => (
-            <span className="chip" key={r}>
-              {r}
+            <span className="chip" key={r} title={r}>
+              <DName kind="role" id={r} />
             </span>
           ))}
         </div>

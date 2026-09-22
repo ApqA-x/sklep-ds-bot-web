@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { Empty, ErrorBox, Loading } from "../components/ui";
 import { fmtDate, fmtDuration } from "../lib/format";
+import { DName } from "../names";
 
 export default function Active() {
   const { guildId = "" } = useParams();
@@ -23,7 +24,7 @@ export default function Active() {
       {sessions.map((session) => (
         <div className="card" key={session.id}>
           <div className="card-head">
-            <strong>Канал {session.channelId}</strong>
+            <strong>Канал <DName kind="channel" id={session.channelId} /></strong>
             <span className="muted">с {fmtDate(session.startedAt)}</span>
           </div>
           <table>

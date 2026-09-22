@@ -4,6 +4,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDate } from "../lib/format";
+import { DName } from "../names";
 
 export default function Sessions() {
   const { guildId = "" } = useParams();
@@ -52,11 +53,13 @@ export default function Sessions() {
             {items.map((s) => (
               <tr key={s.id}>
                 <td>
-                  <Link to={`/g/${guildId}/sessions/${s.id}`}>{s.channelId}</Link>
+                  <Link to={`/g/${guildId}/sessions/${s.id}`}>
+                    <DName kind="channel" id={s.channelId} />
+                  </Link>
                 </td>
                 <td>{fmtDate(s.startedAt)}</td>
                 <td>{fmtDate(s.endedAt)}</td>
-                <td>{s.endedByUserId ?? "—"}</td>
+                <td>{s.endedByUserId ? <DName kind="user" id={s.endedByUserId} /> : "—"}</td>
                 <td>{s.hasSummary ? "есть" : "—"}</td>
               </tr>
             ))}

@@ -19,7 +19,7 @@ export function Empty({ children }: { children: ReactNode }) {
   return <div className="state empty">{children}</div>;
 }
 
-export function Section({ title, children }: { title: string; children: ReactNode }) {
+export function Section({ title, children }: { title: ReactNode; children: ReactNode }) {
   return (
     <section className="section">
       <h2>{title}</h2>

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
 import { api } from "./api/client";
+import { nameOf, useNames } from "./names";
 import { useGuild } from "./guild";
 
 export default function Layout() {
@@ -11,6 +12,7 @@ export default function Layout() {
   const [input, setInput] = useState("");
   const whoami = useQuery({ queryKey: ["whoami"], queryFn: api.whoami });
   const me = whoami.data;
+  const names = useNames(guildId);
 
   return (
     <div className="layout">
@@ -61,7 +63,7 @@ export default function Layout() {
               title="сменить сервер"
               onClick={() => navigate("/")}
             >
-              {guildId}
+              {nameOf(names.data, "guild", guildId)}
             </button>
           )}
         </form>

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { Button } from "primereact/button";
 import { api } from "../api/client";
 import { ErrorBox, Loading } from "../components/ui";
 import { useGuild } from "../guild";
@@ -29,7 +30,7 @@ export default function Home() {
         <ul className="guild-list">
           {guilds.data.guilds.map((g) => (
             <li key={g.guildId}>
-              <button onClick={() => pickGuild(g.guildId)}>{g.name}</button>
+              <Button onClick={() => pickGuild(g.guildId)}>{g.name}</Button>
             </li>
           ))}
         </ul>

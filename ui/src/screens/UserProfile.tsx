@@ -1,6 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
+import { Button } from "primereact/button";
+import { InputText } from "primereact/inputtext";
+import { SelectButton } from "primereact/selectbutton";
+import { confirmDialog } from "primereact/confirmdialog";
 import {
   Line,
   LineChart,
@@ -62,11 +66,13 @@ export default function UserProfile() {
   return (
     <>
       <div className="toolbar">
-        {PERIODS.map((x) => (
-          <button key={x} className={x === period ? "chip active" : "chip"} onClick={() => setPeriod(x)}>
-            {x}
-          </button>
-        ))}
+        <SelectButton
+          className="chip-group"
+          value={period}
+          options={PERIODS.map((x) => ({ label: x, value: x }))}
+          optionValue="value"
+          onChange={(e) => setPeriod(e.value as Period)}
+        />
       </div>
       <Section title={p.userName}>
         <p className="muted">
@@ -151,15 +157,14 @@ export default function UserProfile() {
                   {color && <span className="opt-dot" style={{ background: color }} />}
                   <DName kind="role" id={r} />
                   {canWrite && (
-                    <button
+                    <Button
                       className="chip-x"
                       type="button"
+                      label="×"
                       aria-label={`снять роль ${meta?.name ?? r}`}
                       disabled={revoke.isPending || (meta ? !meta.assignable : false)}
                       onClick={() => revoke.mutate(r)}
-                    >
-                      ×
-                    </button>
+                    />
                   )}
                 </span>
               );
@@ -310,15 +315,15 @@ function ActionPanel({
               disabled={busy}
             />
           ) : (
-            <input value={roleId} onChange={(e) => setRoleId(e.target.value)} placeholder="role id" />
+            <InputText value={roleId} onChange={(e) => setRoleId(e.target.value)} placeholder="role id" />
           )}
           <div className="action-row">
-            <button disabled={busy || !canGrant} onClick={() => run.mutate({ kind: "grant" })}>
+            <Button disabled={busy || !canGrant} onClick={() => run.mutate({ kind: "grant" })}>
               выдать роль
-            </button>
-            <button disabled={busy || !canRevoke} onClick={() => run.mutate({ kind: "revoke" })}>
+            </Button>
+            <Button disabled={busy || !canRevoke} onClick={() => run.mutate({ kind: "revoke" })}>
               снять роль
-            </button>
+            </Button>
           </div>
           <p className="muted tiny">
             Снять можно и крестиком в списке ролей выше — так роль сразу исчезает из карточки.
@@ -327,24 +332,20 @@ function ActionPanel({
 
         <div className="action">
           <h4>Тайм-аут</h4>
-          <div className="chips">
-            {TIMEOUT_PRESETS.map((t) => (
-              <button
-                key={t.seconds}
-                className={t.seconds === seconds ? "chip active" : "chip"}
-                onClick={() => setSeconds(t.seconds)}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
+          <SelectButton
+            className="chip-group"
+            value={seconds}
+            options={TIMEOUT_PRESETS.map((t) => ({ label: t.label, value: t.seconds }))}
+            optionValue="value"
+            onChange={(e) => setSeconds(e.value as number)}
+          />
           <div className="action-row">
-            <button disabled={busy} onClick={() => run.mutate({ kind: "mute" })}>
+            <Button disabled={busy} onClick={() => run.mutate({ kind: "mute" })}>
               в тайм-аут
-            </button>
-            <button disabled={busy || !timeoutUntil} onClick={() => run.mutate({ kind: "unmute" })}>
+            </Button>
+            <Button disabled={busy || !timeoutUntil} onClick={() => run.mutate({ kind: "unmute" })}>
               снять тайм-аут
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -359,33 +360,47 @@ function ActionPanel({
               disabled={busy}
             />
           ) : (
-            <input value={channelId} onChange={(e) => setChannelId(e.target.value)} placeholder="voice channel id" />
+            <InputText
+              value={channelId}
+              onChange={(e) => setChannelId(e.target.value)}
+              placeholder="voice channel id"
+            />
           )}
           <div className="action-row">
-            <button disabled={moveDisabled} onClick={() => run.mutate({ kind: "move" })}>
+            <Button disabled={moveDisabled} onClick={() => run.mutate({ kind: "move" })}>
               переместить
-            </button>
-            <button disabled={busy || !voiceChannelId} onClick={() => run.mutate({ kind: "disconnect" })}>
+            </Button>
+            <Button disabled={busy || !voiceChannelId} onClick={() => run.mutate({ kind: "disconnect" })}>
               выкинуть из канала
-            </button>
+            </Button>
           </div>
           {live && !voiceChannelId && <p className="muted tiny">перемещение доступно, пока участник в голосовом</p>}
         </div>
 
         <div className="action danger">
           <h4>Кик с сервера</h4>
-          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="причина (в аудит-лог Discord)" />
-          <button
-            className="danger"
+          <InputText
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+            placeholder="причина (в аудит-лог Discord)"
+          />
+          <Button
+            severity="danger"
             disabled={busy || reason.trim().length === 0}
             onClick={() => {
-              if (window.confirm(`Кикнуть пользователя ${userId} с сервера? Это можно будет исправить только инвайтом.`)) {
-                run.mutate({ kind: "kick" });
-              }
+              confirmDialog({
+                header: "Кик с сервера",
+                message: `Кикнуть пользователя ${userId} с сервера? Это можно будет исправить только инвайтом.`,
+                icon: "pi pi-exclamation-triangle",
+                acceptLabel: "Кикнуть",
+                rejectLabel: "Отмена",
+                acceptClassName: "p-button-danger",
+                accept: () => run.mutate({ kind: "kick" }),
+              });
             }}
           >
             кикнуть
-          </button>
+          </Button>
         </div>
       </div>
     </Section>

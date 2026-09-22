@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
+import { Button } from "primereact/button";
 import { api } from "../api/client";
 import type { SessionDetail as SessionDetailType } from "../api/types";
 import { Empty, ErrorBox, Loading } from "../components/ui";
@@ -69,14 +70,14 @@ function SessionExpanded({
       <div className="session-summary muted tiny">
         Обновлено: {s.updatedAt ? fmtUtc(new Date(s.updatedAt)) : fmtUtc(new Date(query.dataUpdatedAt))} · Всего:{" "}
         {s.participants.length} ·{" "}
-        <button
+        <Button
           type="button"
           className={showOnline ? "online-count active" : "online-count"}
           title="показать, кто сейчас в канале"
           onClick={() => setShowOnline((v) => !v)}
         >
           В сети: {online.length}
-        </button>
+        </Button>
       </div>
       {showOnline && (
         <div className="online-list">
@@ -181,13 +182,13 @@ export default function Active() {
           </div>
           <div className="card-sub muted">
             <span>с {fmtDate(session.startedAt)}</span>
-            <button
+            <Button
               type="button"
               className="expander"
               onClick={() => setOpenId(session.id === openIds ? null : session.id)}
             >
               {session.id === openIds ? "скрыть подробности ▴" : "подробности ▾"}
-            </button>
+            </Button>
           </div>
           <table>
             <thead>

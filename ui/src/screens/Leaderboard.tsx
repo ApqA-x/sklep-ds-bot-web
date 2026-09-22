@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { Button } from "primereact/button";
+import { SelectButton } from "primereact/selectbutton";
 import {
   Bar,
   BarChart,
@@ -50,18 +52,16 @@ export default function Leaderboard() {
   return (
     <>
       <div className="toolbar">
-        {PERIODS.map((p) => (
-          <button
-            key={p}
-            className={p === period ? "chip active" : "chip"}
-            onClick={() => {
-              setPeriod(p);
-              setPage(1);
-            }}
-          >
-            {p}
-          </button>
-        ))}
+        <SelectButton
+          className="chip-group"
+          value={period}
+          options={PERIODS.map((p) => ({ label: p, value: p }))}
+          optionValue="value"
+          onChange={(e) => {
+            setPeriod(e.value as Period);
+            setPage(1);
+          }}
+        />
       </div>
       {items.length > 0 && (
         <Section title={`Топ-${top}, часы в голосе (стр. ${page})`}>
@@ -102,15 +102,11 @@ export default function Leaderboard() {
               : `стр. ${page} из ${pages}: с ${rankOffset + 1} по ${rankOffset + items.length}`}
           </span>
           <span style={{ flex: 1 }} />
-          <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-            ←
-          </button>
+          <Button icon="pi pi-arrow-left" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} />
           <span>
             {page} / {pages}
           </span>
-          <button disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
-            →
-          </button>
+          <Button icon="pi pi-arrow-right" disabled={page >= pages} onClick={() => setPage((p) => p + 1)} />
         </div>
         <table>
           <thead>

@@ -1,9 +1,13 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
+import { Button } from "primereact/button";
+import { Dropdown } from "primereact/dropdown";
+import { SelectButton } from "primereact/selectbutton";
 import { api } from "../api/client";
 import { AuditDetails } from "../components/auditText";
 import { TargetUserPicker } from "../components/userSearch";
+import { DateField } from "../components/dateField";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDate } from "../lib/format";
 import { DName } from "../names";
@@ -101,79 +105,65 @@ export default function Audit() {
   return (
     <Section title={`Журнал изменений (${data.total})`}>
       <div className="toolbar">
-        <button
+        <Button
           className={showFilters || hasFilters ? "chip active" : "chip"}
           onClick={() => setShowFilters((v) => !v)}
         >
           Фильтры
           {activeCount > 0 && <span className="count-badge">{activeCount}</span>}
-        </button>
+        </Button>
         <span className="muted tiny">
           {hasFilters ? `активных фильтров: ${activeCount}` : "фильтры не заданы"}
         </span>
         <span style={{ flex: 1 }} />
-        <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-          ←
-        </button>
+        <Button icon="pi pi-arrow-left" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} />
         <span>
           {page} / {pages}
         </span>
-        <button disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
-          →
-        </button>
+        <Button icon="pi pi-arrow-right" disabled={page >= pages} onClick={() => setPage((p) => p + 1)} />
       </div>
       {showFilters && (
         <div className="filters-panel">
           <div className="filter-block">
             <h4>Источник</h4>
-            <div className="chips">
-              {FILTERS.map((f) => (
-                <button
-                  key={f.key || "all"}
-                  className={f.key === origin ? "chip active" : "chip"}
-                  onClick={() => {
-                    setOrigin(f.key);
-                    resetPage();
-                  }}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
+            <SelectButton
+              className="chip-group"
+              value={origin}
+              options={FILTERS.map((f) => ({ label: f.label, value: f.key }))}
+              optionValue="value"
+              onChange={(e) => {
+                setOrigin(e.value as OriginFilter);
+                resetPage();
+              }}
+            />
           </div>
           <div className="filter-block">
             <h4>Итог</h4>
-            <div className="chips">
-              {OK_FILTERS.map((f) => (
-                <button
-                  key={f.key || "any"}
-                  className={f.key === okFilter ? "chip active" : "chip"}
-                  onClick={() => {
-                    setOkFilter(f.key);
-                    resetPage();
-                  }}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
+            <SelectButton
+              className="chip-group"
+              value={okFilter}
+              options={OK_FILTERS.map((f) => ({ label: f.label, value: f.key }))}
+              optionValue="value"
+              onChange={(e) => {
+                setOkFilter(e.value as "" | "1" | "0");
+                resetPage();
+              }}
+            />
           </div>
           <div className="filter-block">
             <h4>Действие</h4>
-            <select
+            <Dropdown
               value={action}
+              options={[
+                { label: "все действия", value: "" },
+                ...(facets.data?.items ?? []).map((a) => ({ label: `${a.action} (${a.count})`, value: a.action })),
+              ]}
+              optionValue="value"
               onChange={(e) => {
-                setAction(e.target.value);
+                setAction(e.value as string);
                 resetPage();
               }}
-            >
-              <option value="">все действия</option>
-              {(facets.data?.items ?? []).map((a) => (
-                <option key={a.action} value={a.action}>
-                  {a.action} ({a.count})
-                </option>
-              ))}
-            </select>
+            />
           </div>
           <div className="filter-block">
             <h4>Цель</h4>
@@ -190,50 +180,48 @@ export default function Audit() {
           <div className="filter-block">
             <h4>Период</h4>
             <div className="filter-row">
-              <label className="chart-control">
+              <span className="chart-control">
                 <span>с</span>
-                <input
-                  type="date"
+                <DateField
                   value={dateFrom}
-                  onChange={(e) => {
-                    setDateFrom(e.target.value);
+                  placeholder="дд.мм.гггг"
+                  onChange={(v) => {
+                    setDateFrom(v);
                     resetPage();
                   }}
                 />
-              </label>
-              <label className="chart-control">
+              </span>
+              <span className="chart-control">
                 <span>по</span>
-                <input
-                  type="date"
+                <DateField
                   value={dateTo}
-                  onChange={(e) => {
-                    setDateTo(e.target.value);
+                  placeholder="дд.мм.гггг"
+                  onChange={(v) => {
+                    setDateTo(v);
                     resetPage();
                   }}
                 />
-              </label>
+              </span>
             </div>
           </div>
           <div className="filter-block">
             <h4>Порядок</h4>
-            <div className="chips">
-              <button
-                className="chip"
-                onClick={() => {
-                  setSort((s) => (s === "desc" ? "asc" : "desc"));
-                  resetPage();
-                }}
-              >
-                {sort === "desc" ? "сначала новые ↓" : "сначала старые ↑"}
-              </button>
-            </div>
+            <Button
+              className="chip"
+              onClick={() => {
+                setSort((s) => (s === "desc" ? "asc" : "desc"));
+                resetPage();
+              }}
+            >
+              {sort === "desc" ? "сначала новые ↓" : "сначала старые ↑"}
+            </Button>
           </div>
           {hasFilters && (
             <div className="filter-actions">
               <span className="muted tiny">активных фильтров: {activeCount}</span>
-              <button className="linklike" onClick={resetAll}>
+              <Button className="linklike" onClick={resetAll}>
                 сбросить все фильтры
-              </button>
+              </Button>
             </div>
           )}
         </div>

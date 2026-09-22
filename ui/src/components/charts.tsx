@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { Checkbox } from "primereact/checkbox";
+import { Dropdown } from "primereact/dropdown";
 import { CartesianGrid } from "recharts";
 
 // Полоски фона по умолчанию полупрозрачные — не перетягивают внимание на себя.
@@ -29,18 +31,17 @@ export function ChartControls({
       {setTop && topOptions && (
         <label className="chart-control">
           <span>в кадре</span>
-          <select value={top} onChange={(e) => setTop(Number(e.target.value))}>
-            {topOptions.map((n) => (
-              <option key={n} value={n}>
-                топ-{n}
-              </option>
-            ))}
-          </select>
+          <Dropdown
+            value={top}
+            options={topOptions.map((n) => ({ label: `топ-${n}`, value: n }))}
+            optionValue="value"
+            onChange={(e) => setTop(e.value as number)}
+          />
         </label>
       )}
       <label className="chart-control">
         <span>линии фона</span>
-        <input type="checkbox" checked={grid} onChange={(e) => setGrid(e.target.checked)} />
+        <Checkbox checked={grid} onChange={() => setGrid(!grid)} />
       </label>
     </div>
   );

@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
+import { Button } from "primereact/button";
+import { SelectButton } from "primereact/selectbutton";
 import { api } from "../api/client";
 import type { ChatAttachment, ChatMessage } from "../api/types";
 import { TargetUserPicker } from "../components/userSearch";
+import { DateField } from "../components/dateField";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
 import { fmtBytes, fmtDate } from "../lib/format";
 import { nameOf, useNames } from "../names";
@@ -135,13 +138,13 @@ export default function Chat() {
       ) : (
         <>
           <div className="toolbar">
-            <button
+            <Button
               className={showFilters || activeCount > 0 ? "chip active" : "chip"}
               onClick={() => setShowFilters((v) => !v)}
             >
               Фильтры
               {activeCount > 0 && <span className="count-badge">{activeCount}</span>}
-            </button>
+            </Button>
             <span className="muted tiny">
               {activeCount > 0 ? `активных фильтров: ${activeCount}` : "фильтры не заданы"}
             </span>
@@ -159,29 +162,33 @@ export default function Chat() {
               </div>
               <div className="filter-block">
                 <h4>Тип сообщения</h4>
-                <div className="chips">
-                  {TYPE_FILTERS.map((t) => (
-                    <button
-                      key={t.key || "all"}
-                      className={t.key === filters.type ? "chip active" : "chip"}
-                      onClick={() => set({ type: t.key })}
-                    >
-                      {t.label}
-                    </button>
-                  ))}
-                </div>
+                <SelectButton
+                  className="chip-group"
+                  value={filters.type}
+                  options={TYPE_FILTERS.map((t) => ({ label: t.label, value: t.key }))}
+                  optionValue="value"
+                  onChange={(e) => set({ type: e.value as string })}
+                />
               </div>
               <div className="filter-block">
                 <h4>Период (границы включительно)</h4>
                 <div className="filter-row">
-                  <label className="chart-control">
+                  <span className="chart-control">
                     <span>с</span>
-                    <input type="date" value={filters.dateFrom} onChange={(e) => set({ dateFrom: e.target.value })} />
-                  </label>
-                  <label className="chart-control">
+                    <DateField
+                      value={filters.dateFrom}
+                      placeholder="дд.мм.гггг"
+                      onChange={(v) => set({ dateFrom: v })}
+                    />
+                  </span>
+                  <span className="chart-control">
                     <span>по</span>
-                    <input type="date" value={filters.dateTo} onChange={(e) => set({ dateTo: e.target.value })} />
-                  </label>
+                    <DateField
+                      value={filters.dateTo}
+                      placeholder="дд.мм.гггг"
+                      onChange={(v) => set({ dateTo: v })}
+                    />
+                  </span>
                 </div>
               </div>
               {activeCount > 0 && (
@@ -191,42 +198,45 @@ export default function Chat() {
                     {filters.userId ? `автор: ${nameOf(names.data, "user", filters.userId) || filters.userId} · ` : ""}
                     {(filters.dateFrom || filters.dateTo) && `период: ${filters.dateFrom || "…"} — ${filters.dateTo || "…"}`}
                   </span>
-                  <button className="linklike" onClick={() => set({ userId: "", type: "", dateFrom: "", dateTo: "" })}>
+                  <Button
+                    className="linklike"
+                    onClick={() => set({ userId: "", type: "", dateFrom: "", dateTo: "" })}
+                  >
                     сбросить фильтры
-                  </button>
+                  </Button>
                 </div>
               )}
             </div>
           )}
           <div className="toolbar">
-            <button
+            <Button
               className={filters.channelId === "" ? "chip active" : "chip"}
               onClick={() => set({ channelId: "" })}
             >
               все каналы
-            </button>
+            </Button>
             {available.map((c) => (
-              <button
+              <Button
                 key={c.channelId}
                 className={c.channelId === filters.channelId ? "chip active" : "chip"}
                 onClick={() => set({ channelId: c.channelId })}
               >
                 {nameOf(names.data, "channel", c.channelId)} ({c.count})
-              </button>
+              </Button>
             ))}
-            <button
+            <Button
               className="sort-toggle"
               title="порядок по дате"
               onClick={() => set({ sort: filters.sort === "desc" ? "asc" : "desc" })}
             >
               <span className="sort-arrow">{filters.sort === "desc" ? "↓" : "↑"}</span>
               {filters.sort === "desc" ? "сначала новые" : "сначала старые"}
-            </button>
+            </Button>
           </div>
           {error && <ErrorBox error={new Error(error)} />}
           {cursor !== undefined && cursor !== null && (
             <div className="toolbar">
-              <button
+              <Button
                 disabled={loading}
                 onClick={() =>
                   void fetchPage(
@@ -235,7 +245,7 @@ export default function Chat() {
                 }
               >
                 {loading ? "загрузка…" : filters.sort === "desc" ? "показать более ранние" : "показать более новые"}
-              </button>
+              </Button>
             </div>
           )}
           {loading && messages.length === 0 ? (
@@ -245,9 +255,9 @@ export default function Chat() {
               <Empty>Нет сообщений под выбранные фильтры.</Empty>
               {activeCount > 0 && (
                 <p className="muted tiny">
-                  <button className="linklike" onClick={() => setShowFilters(true)}>
+                  <Button className="linklike" onClick={() => setShowFilters(true)}>
                     ослабить фильтры
-                  </button>
+                  </Button>
                 </p>
               )}
             </>

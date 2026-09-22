@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
+import { Button } from "primereact/button";
 import { api } from "../api/client";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
 import { fmtClock, fmtDate } from "../lib/format";
@@ -95,15 +96,11 @@ export default function Sessions() {
       </Section>
       <Section title={`История сессий (${total})`}>
         <div className="toolbar">
-          <button disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
-            ←
-          </button>
+          <Button icon="pi pi-arrow-left" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} />
           <span>
             {page} / {pages}
           </span>
-          <button disabled={page >= pages} onClick={() => setPage((p) => p + 1)}>
-            →
-          </button>
+          <Button icon="pi pi-arrow-right" disabled={page >= pages} onClick={() => setPage((p) => p + 1)} />
         </div>
         {items.length === 0 ? (
           <Empty>Закрытых сессий нет.</Empty>

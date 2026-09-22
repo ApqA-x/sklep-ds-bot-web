@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { AutoComplete } from "primereact/autocomplete";
+import { Button } from "primereact/button";
 import { api } from "../api/client";
 import { DName } from "../names";
 
-// поиск пользователя по имени с автоподсказкой (ручной ввод snowflake тоже принимается)
+type MemberHit = { userId: string; userName: string };
+
+// PrimeReact AutoComplete: подсказки по имени (от 2 символов) + ручной ввод snowflake
 export function TargetUserPicker({
   guildId,
   placeholder,
@@ -16,83 +19,67 @@ export function TargetUserPicker({
   onChange: (id: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [debounced, setDebounced] = useState("");
-  const [open, setOpen] = useState(false);
-  const root = useRef<HTMLDivElement>(null);
+  const [suggestions, setSuggestions] = useState<MemberHit[]>([]);
 
-  useEffect(() => {
-    const id = setTimeout(() => setDebounced(query.trim()), 400);
-    return () => clearTimeout(id);
-  }, [query]);
-
-  useEffect(() => {
-    const onDocClick = (e: MouseEvent) => {
-      if (root.current && !root.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", onDocClick);
-    return () => document.removeEventListener("mousedown", onDocClick);
-  }, []);
-
-  const hits = useQuery({
-    queryKey: ["member-search", guildId, debounced],
-    queryFn: () => api.members(guildId, debounced),
-    enabled: debounced.length >= 2,
-  });
+  const complete = async (event: { query: string }) => {
+    const q = event.query.trim();
+    if (q.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    try {
+      const res = await api.members(guildId, q);
+      setSuggestions(res.items);
+    } catch {
+      setSuggestions([]);
+    }
+  };
 
   if (value) {
     return (
       <span className="chip" title={value}>
         <DName kind="user" id={value} />
-        <button type="button" onClick={() => onChange("")} aria-label="сбросить фильтр по пользователю">
-          ×
-        </button>
+        <Button
+          className="chip-x"
+          type="button"
+          label="×"
+          aria-label="сбросить фильтр по пользователю"
+          onClick={() => onChange("")}
+        />
       </span>
     );
   }
 
   return (
-    <div className="opt-select" ref={root} style={{ position: "relative" }}>
-      <input
-        placeholder={placeholder}
-        value={query}
-        style={{ width: "14rem" }}
-        onChange={(e) => {
-          const v = e.target.value;
+    <AutoComplete
+      value={query}
+      suggestions={suggestions}
+      completeMethod={complete}
+      minLength={2}
+      delay={400}
+      field="userName"
+      dropdown={false}
+      placeholder={placeholder}
+      inputStyle={{ width: "14rem" }}
+      onChange={(e) => {
+        const v = e.value as string | MemberHit | null;
+        if (typeof v === "string") {
           setQuery(v);
-          setOpen(true);
-          if (/^\d{5,25}$/.test(v.trim())) onChange(v.trim());
-        }}
-      />
-      {open && debounced.length >= 2 && (hits.data?.items.length ?? 0) > 0 && (
-        <div
-          className="opt-list"
-          role="listbox"
-          style={{
-            position: "absolute",
-            zIndex: 10,
-            background: "var(--panel)",
-            border: "1px solid var(--border)",
-            borderRadius: 8,
-            width: "100%",
-          }}
-        >
-          {hits.data!.items.map((m) => (
-            <button
-              key={m.userId}
-              type="button"
-              role="option"
-              className="opt-item"
-              onClick={() => {
-                onChange(m.userId);
-                setQuery("");
-                setOpen(false);
-              }}
-            >
-              {m.userName}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
+          const trimmed = v.trim();
+          if (/^\d{5,25}$/.test(trimmed)) onChange(trimmed);
+        } else if (v && typeof v === "object") {
+          const hit = v as MemberHit;
+          onChange(hit.userId);
+          setQuery("");
+          setSuggestions([]);
+        }
+      }}
+      onSelect={(e) => {
+        const hit = e.value as MemberHit;
+        onChange(hit.userId);
+        setQuery("");
+        setSuggestions([]);
+      }}
+    />
   );
 }

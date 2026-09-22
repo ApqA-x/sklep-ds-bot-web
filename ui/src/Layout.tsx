@@ -1,6 +1,9 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { NavLink, Outlet, useNavigate, useParams } from "react-router-dom";
+import { Button } from "primereact/button";
+import { ConfirmDialog } from "primereact/confirmdialog";
+import { InputText } from "primereact/inputtext";
 import { api } from "./api/client";
 import { nameOf, useNames } from "./names";
 import { useGuild } from "./guild";
@@ -16,6 +19,7 @@ export default function Layout() {
 
   return (
     <div className="layout">
+      <ConfirmDialog />
       <header className="topbar">
         <span className="brand">Estera</span>
         {guildId && (
@@ -32,15 +36,15 @@ export default function Layout() {
         {me?.authenticated && (
           <span className="user-chip">
             {me.user?.userName}
-            <button
+            <Button
+              className="chip-x"
               type="button"
+              label="выход"
               onClick={async () => {
                 await api.logout();
                 navigate("/");
               }}
-            >
-              выход
-            </button>
+            />
           </span>
         )}
         <form
@@ -51,21 +55,20 @@ export default function Layout() {
             setInput("");
           }}
         >
-          <input
+          <InputText
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="guild id"
             aria-label="guild id"
           />
-          <button type="submit">→</button>
+          <Button type="submit" icon="pi pi-arrow-right" text aria-label="выбрать сервер" />
           {guildId && (
-            <button
+            <Button
               type="button"
               title="сменить сервер"
+              label={nameOf(names.data, "guild", guildId)}
               onClick={() => navigate("/")}
-            >
-              {nameOf(names.data, "guild", guildId)}
-            </button>
+            />
           )}
         </form>
       </header>

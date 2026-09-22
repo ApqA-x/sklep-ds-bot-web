@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
+import { Button } from "primereact/button";
+import { Checkbox } from "primereact/checkbox";
+import { Dropdown } from "primereact/dropdown";
+import { InputText } from "primereact/inputtext";
 import { api, useCanWrite } from "../api/client";
 import type { VoiceChannelOption } from "../api/types";
 import { ErrorBox, Loading, Section } from "../components/ui";
@@ -88,6 +92,8 @@ function NameHint({ kind, value }: { kind: NameKind; value: unknown }) {
   );
 }
 
+type SelectOpt = { label: string; value: string };
+
 // Выпадающий список каналов: живые имена из /picker; выбранный id, которого нет
 // в списке (бот вышел/канал удалён), сохраняется отдельной опцией.
 function ChannelSelect({
@@ -107,18 +113,21 @@ function ChannelSelect({
 }) {
   const current = String(value ?? "");
   const known = options.some((c) => c.id === current);
+  const items: SelectOpt[] = [
+    ...(allowEmpty !== undefined ? [{ value: "", label: allowEmpty }] : []),
+    ...(current !== "" && !known ? [{ value: current, label: `${current} (нет в списке)` }] : []),
+    ...options.map((c) => ({ value: c.id, label: c.name })),
+  ];
   return (
     <label className="field">
       <span>{label}</span>
-      <select value={current} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
-        {allowEmpty !== undefined && <option value="">{allowEmpty}</option>}
-        {current !== "" && !known && <option value={current}>{current} (нет в списке)</option>}
-        {options.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.name}
-          </option>
-        ))}
-      </select>
+      <Dropdown
+        value={current}
+        options={items}
+        optionValue="value"
+        disabled={disabled}
+        onChange={(e) => onChange(e.value as string)}
+      />
       {!known && <NameHint kind="channel" value={current} />}
     </label>
   );
@@ -181,36 +190,35 @@ function IdList({
           >
             {select && !manual ? (
               <>
-                <select value={input} onChange={(e) => setInput(e.target.value)} aria-label={`${title} канал`}>
-                  <option value="">— канал —</option>
-                  {options.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-                <button type="button" className="linklike" onClick={() => setManual(true)}>
+                <Dropdown
+                  value={input}
+                  options={[{ value: "", label: "— канал —" }, ...options.map((c) => ({ value: c.id, label: c.name }))]}
+                  optionValue="value"
+                  aria-label={`${title} канал`}
+                  onChange={(e) => setInput(e.value as string)}
+                />
+                <Button className="linklike" type="button" onClick={() => setManual(true)}>
                   id вручную
-                </button>
+                </Button>
               </>
             ) : (
               <>
-                <input
+                <InputText
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   placeholder="user/channel id"
                   aria-label={`${title} id`}
                 />
                 {select && (
-                  <button type="button" className="linklike" onClick={() => setManual(false)}>
+                  <Button className="linklike" type="button" onClick={() => setManual(false)}>
                     из списка
-                  </button>
+                  </Button>
                 )}
               </>
             )}
-            <button type="submit" disabled={busy || input.trim() === ""}>
+            <Button type="submit" disabled={busy || input.trim() === ""}>
               добавить
-            </button>
+            </Button>
           </form>
           ))}
       </div>
@@ -220,9 +228,14 @@ function IdList({
           <span className="chip" key={id} title={id}>
             <DName kind={kind} id={id} />
             {!disabled && (
-              <button type="button" onClick={() => onRemove(id)} disabled={busy} aria-label={`удалить ${id}`}>
-                ×
-              </button>
+              <Button
+                className="chip-x"
+                type="button"
+                label="×"
+                onClick={() => onRemove(id)}
+                disabled={busy}
+                aria-label={`удалить ${id}`}
+              />
             )}
           </span>
         ))}
@@ -334,15 +347,17 @@ export default function Settings() {
       <Section title="Трекинг">
         <label className="field">
           <span>trackingMode</span>
-          <select
+          <Dropdown
             value={String(form.trackingMode ?? "all")}
+            options={[
+              { value: "all", label: "all — все голосовые каналы" },
+              { value: "none", label: "none — не трековать" },
+              { value: "specific", label: "specific — только выбранные каналы" },
+            ]}
+            optionValue="value"
             disabled={!canWrite}
-            onChange={(e) => set("trackingMode", e.target.value)}
-          >
-            <option value="all">all — все голосовые каналы</option>
-            <option value="none">none — не трековать</option>
-            <option value="specific">specific — только выбранные каналы</option>
-          </select>
+            onChange={(e) => set("trackingMode", e.value as string)}
+          />
         </label>
         <p className="muted tiny">
           <strong>all</strong> — бот пишет голосовые сессии по всем голосовым каналам сервера.{" "}
@@ -407,16 +422,15 @@ export default function Settings() {
         <div className="events-grid">
           {ACTIVITY_EVENT_TYPES.map(([key, title, hint]) => (
             <label key={key} className="check" title={hint}>
-              <input
-                type="checkbox"
+              <Checkbox
                 disabled={!canWrite}
                 checked={eventTypes.includes(key)}
-                onChange={(e) =>
+                onChange={() =>
                   set(
                     "activityEventTypes",
-                    e.target.checked
-                      ? [...new Set([...eventTypes, key])]
-                      : eventTypes.filter((x) => x !== key),
+                    eventTypes.includes(key)
+                      ? eventTypes.filter((x) => x !== key)
+                      : [...new Set([...eventTypes, key])],
                   )
                 }
               />
@@ -451,15 +465,17 @@ export default function Settings() {
                 <td>{description}</td>
                 <td className="muted">{def === "admin" ? "ADMIN" : "все"}</td>
                 <td>
-                  <select
+                  <Dropdown
                     value={commandAccess[name] ?? ""}
+                    options={[
+                      { value: "", label: "как по умолчанию" },
+                      { value: "all", label: "все" },
+                      { value: "admin", label: "ADMIN ONLY" },
+                    ]}
+                    optionValue="value"
                     disabled={!canWrite}
-                    onChange={(e) => setCommandAccess(name, e.target.value)}
-                  >
-                    <option value="">как по умолчанию</option>
-                    <option value="all">все</option>
-                    <option value="admin">ADMIN ONLY</option>
-                  </select>
+                    onChange={(e) => setCommandAccess(name, e.value as string)}
+                  />
                 </td>
               </tr>
             ))}
@@ -468,11 +484,10 @@ export default function Settings() {
       </Section>
       <Section title="Прочее">
         <label className="check">
-          <input
-            type="checkbox"
+          <Checkbox
             disabled={!canWrite}
             checked={Boolean(form.soundboardEnforcementEnabled)}
-            onChange={(e) => set("soundboardEnforcementEnabled", e.target.checked)}
+            onChange={() => set("soundboardEnforcementEnabled", !Boolean(form.soundboardEnforcementEnabled))}
           />
           <span>
             Soundboard-модерация
@@ -486,20 +501,21 @@ export default function Settings() {
         <label className="field">
           <span>Autorole</span>
           {roleOptions.length > 0 ? (
-            <select
+            <Dropdown
               value={String(form.autoRoleId ?? "")}
+              options={[
+                { value: "", label: "— не задана —" },
+                ...(form.autoRoleId && !roleOptions.some((r) => r.id === String(form.autoRoleId))
+                  ? [{ value: String(form.autoRoleId), label: `${form.autoRoleId} (нет в списке)` }]
+                  : []),
+                ...roleOptions.map((r) => ({ value: r.id, label: r.name })),
+              ]}
+              optionValue="value"
               disabled={!canWrite}
-              onChange={(e) => set("autoRoleId", e.target.value)}
-            >
-              <option value="">— не задана —</option>
-              {(form.autoRoleId && !roleOptions.some((r) => r.id === String(form.autoRoleId)) ? [{ id: String(form.autoRoleId), name: `${form.autoRoleId} (нет в списке)`, color: 0, position: 0, managed: false, assignable: true }, ...roleOptions] : roleOptions).map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.name}
-                </option>
-              ))}
-            </select>
+              onChange={(e) => set("autoRoleId", e.value as string)}
+            />
           ) : (
-            <input
+            <InputText
               value={String(form.autoRoleId ?? "")}
               disabled={!canWrite}
               onChange={(e) => set("autoRoleId", e.target.value)}
@@ -553,13 +569,14 @@ export default function Settings() {
                   </td>
                   <td>{s.createdAt?.slice(0, 10) ?? "—"}</td>
                   <td>
-                    <button
+                    <Button
+                      severity="danger"
                       onClick={() =>
                         stalker.mutate({ watcher: s.watcherUserId, target: s.targetUserId, action: "remove" })
                       }
                     >
                       удалить
-                    </button>
+                    </Button>
                   </td>
                 </tr>
               ))}
@@ -587,26 +604,25 @@ export default function Settings() {
               value={stalkerForm.target}
               onChange={(id) => setStalkerForm((f) => ({ ...f, target: id }))}
             />
-            <button
+            <Button
               type="submit"
               disabled={
                 !/^\d{5,25}$/.test(stalkerForm.watcher) || !/^\d{5,25}$/.test(stalkerForm.target)
               }
             >
               добавить
-            </button>
+            </Button>
           </form>
         </Section>
       )}
       {canWrite && (
         <div className="toolbar">
-          <button
-            className="chip active"
+          <Button
             disabled={Object.keys(changed).length === 0 || patch.isPending}
             onClick={() => patch.mutate(changed)}
           >
             {patch.isPending ? "сохранение…" : "Сохранить изменения"}
-          </button>
+          </Button>
         </div>
       )}
     </>

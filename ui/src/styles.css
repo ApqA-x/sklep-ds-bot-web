@@ -97,7 +97,8 @@ a:hover {
   align-items: center;
 }
 
-.guild-switch input {
+.guild-switch input,
+.guild-switch .p-inputtext {
   width: 190px;
 }
 
@@ -443,7 +444,7 @@ pre.inline {
   margin-bottom: 0.5rem;
 }
 
-.field span {
+.field > span {
   min-width: 210px;
   color: var(--subtext0);
 }
@@ -451,6 +452,12 @@ pre.inline {
 .field input,
 .field select {
   flex: 1;
+}
+
+.field .p-dropdown,
+.field .p-inputtext {
+  flex: 1;
+  min-width: 0;
 }
 
 .check {
@@ -538,7 +545,9 @@ pre.inline {
   color: var(--red);
 }
 
-.action input {
+.action input,
+.action .p-inputtext,
+.action .p-dropdown {
   width: 100%;
   min-width: 120px;
 }
@@ -728,65 +737,17 @@ button.danger:hover:not(:disabled) {
   }
 }
 
-/* Role/channel pickers */
+/* Role/channel pickers (PrimeReact Dropdown + templates) */
 .opt-select {
   position: relative;
   width: 100%;
 }
 
-.opt-trigger {
+.opt-row {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   width: 100%;
-  text-align: left;
-}
-
-.opt-caret {
-  margin-left: auto;
-  color: var(--subtext0);
-}
-
-.opt-list {
-  position: absolute;
-  z-index: 30;
-  top: calc(100% + 4px);
-  left: 0;
-  min-width: 100%;
-  max-height: 280px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 4px;
-  background: var(--surface0);
-  border: 1px solid var(--surface2);
-  border-radius: 8px;
-  box-shadow: 0 8px 24px rgba(17, 17, 27, 0.6);
-}
-
-.opt-item {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  justify-content: flex-start;
-  border: none;
-  background: transparent;
-  text-align: left;
-}
-
-.opt-item:hover:not(:disabled) {
-  background: var(--surface1);
-}
-
-.opt-item.active {
-  background: var(--surface1);
-}
-
-.opt-item:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 .opt-label {
@@ -1013,64 +974,612 @@ button.danger:hover:not(:disabled) {
   font-size: 0.85rem;
 }
 
-.chart-control select {
+.chart-control .p-dropdown {
   background: var(--surface0);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 6px;
-  padding: 0.15rem 0.4rem;
   font: inherit;
+  font-size: 0.85rem;
 }
 
-.chart-control input[type="checkbox"] {
-  accent-color: var(--green);
+/* PrimeReact Calendar вместо самописного календаря (DateField):
+   стили панели/поля — в блоке «PrimeReact в теме Catppuccin Mocha» ниже */
+
+
+
+/* ============================================================
+   PrimeReact в теме Catppuccin Mocha (импорт идёт после темы,
+   поэтому переопределяем переменные lara-dark-purple и классы)
+   ============================================================ */
+:root {
+  --surface-a: var(--crust);
+  --surface-b: var(--base);
+  --surface-c: var(--surface0);
+  --surface-d: var(--surface1);
+  --surface-e: var(--mantle);
+  --surface-f: var(--crust);
+  --text-color: var(--text);
+  --text-color-secondary: var(--subtext0);
+  --primary-color: var(--mauve);
+  --primary-color-text: var(--crust);
+  --highlight-bg-color: var(--mauve);
+  --highlight-text-color: var(--crust);
+  --font-family: system-ui, "Segoe UI", sans-serif;
+  --font-size: 15px;
+  --content-border-radius: 8px;
+  --nested-content-border-radius: 6px;
+  --focus-ring: 0 0 0 2px var(--crust), 0 0 0 4px var(--mauve);
 }
 
-/* нативный календарь (input[type=date]) в теме проекта */
-input[type="date"] {
-  color-scheme: dark;
-  background: var(--surface0);
+/* Обычные кнопки — как нативные до миграции: crust-фон, тонкая рамка */
+.p-button {
+  background: var(--crust);
+  border: 1px solid var(--surface1);
   color: var(--text);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+  transition: transform 120ms ease, background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+}
+
+.p-button:enabled:hover {
+  transform: scale(1.045);
+  background: color-mix(in srgb, var(--surface0) 72%, black);
+  border-color: var(--surface2);
+  color: var(--text);
+}
+
+.p-button:disabled {
+  opacity: 0.4;
+}
+
+.p-button.p-button-danger {
+  background: var(--red);
+  border-color: var(--red);
+  color: var(--crust);
+  font-weight: 600;
+}
+
+.p-button.p-button-danger:enabled:hover {
+  background: var(--maroon);
+  border-color: var(--maroon);
+  color: var(--crust);
+}
+
+/* chip-кнопки (панели фильтров, каналы чата) */
+.p-button.chip {
+  border-radius: 999px;
+  padding: 0.25rem 0.8rem;
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+}
+
+.p-button.chip:enabled:hover {
+  transform: scale(1.06);
+  background: color-mix(in srgb, var(--surface0) 72%, black);
+  border-color: var(--surface2);
+}
+
+.p-button.chip.active {
+  background: var(--mauve);
+  border-color: var(--mauve);
+  color: var(--crust);
+}
+
+.p-button.chip.active:enabled:hover {
+  background: color-mix(in srgb, var(--mauve) 78%, black);
+  border-color: color-mix(in srgb, var(--mauve) 78%, black);
+  color: var(--crust);
+}
+
+/* SelectButton как группа чипов */
+.p-selectbutton.chip-group {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.p-selectbutton.chip-group .p-button {
+  border-radius: 999px;
+  padding: 0.25rem 0.8rem;
+  background: var(--surface0);
+  border: 1px solid var(--surface1);
+}
+
+.p-selectbutton.chip-group .p-button:not(:first-child) {
+  border-left: 1px solid var(--surface1);
+}
+
+.p-selectbutton.chip-group .p-button:enabled:hover {
+  transform: scale(1.06);
+  background: color-mix(in srgb, var(--surface0) 72%, black);
+  border-color: var(--surface2);
+}
+
+.p-selectbutton.chip-group .p-button.p-highlight {
+  background: var(--mauve);
+  border-color: var(--mauve);
+  color: var(--crust);
+}
+
+.p-selectbutton.chip-group .p-button.p-highlight:enabled:hover {
+  background: color-mix(in srgb, var(--mauve) 78%, black);
+  border-color: color-mix(in srgb, var(--mauve) 78%, black);
+}
+
+/* крестик удаления внутри чипа */
+.p-button.chip-x,
+.chip .p-button.chip-x {
+  background: none;
+  border: none;
+  color: var(--overlay1);
+  padding: 0 0.25rem;
+  margin-left: 0.25rem;
+  border-radius: 4px;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.p-button.chip-x:enabled:hover,
+.chip .p-button.chip-x:enabled:hover {
+  transform: none;
+  background: var(--surface1);
+  color: var(--red);
+  border: none;
+}
+
+/* кнопка-ссылка */
+.p-button.linklike {
+  background: none;
+  border: none;
+  color: var(--lavender);
+  padding: 0;
+  font-size: 0.82rem;
+}
+
+.p-button.linklike:enabled:hover {
+  transform: none;
+  background: none;
+  border: none;
+  color: var(--lavender);
+  text-decoration: underline;
+}
+
+/* expander как ссылка */
+.p-button.expander {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--lavender);
+  font-size: 0.85rem;
+}
+
+.p-button.expander:enabled:hover {
+  transform: none;
+  background: none;
+  border: none;
+  color: var(--lavender);
+  text-decoration: underline;
+}
+
+/* счётчик «В сети» */
+.p-button.online-count {
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  font-weight: 600;
+  color: var(--mauve);
+  background: transparent;
+  border: 1px solid var(--mauve);
+}
+
+.p-button.online-count:enabled:hover {
+  transform: scale(1.06);
+  color: var(--crust);
+  background: color-mix(in srgb, var(--mauve) 78%, black);
+  border-color: color-mix(in srgb, var(--mauve) 78%, black);
+}
+
+.p-button.online-count.active {
+  color: var(--crust);
+  background: var(--mauve);
+}
+
+/* сортировка в чате */
+.p-button.sort-toggle {
+  gap: 0.4rem;
+  border-radius: 999px;
+  padding: 0.25rem 0.9rem;
+  background: var(--surface1);
+  border: 1px solid var(--surface2);
+  color: var(--subtext1);
+  font-weight: 600;
+}
+
+.p-button.sort-toggle:enabled:hover {
+  transform: scale(1.06);
+  background: color-mix(in srgb, var(--surface1) 70%, black);
+  border-color: var(--mauve);
+  color: var(--text);
+}
+
+/* текстовые поля */
+.p-inputtext {
+  background: var(--crust);
+  border: 1px solid var(--surface1);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 0.35rem 0.6rem;
+}
+
+.p-inputtext:enabled:hover {
+  border-color: var(--surface2);
+}
+
+.p-inputtext:enabled:focus {
+  border-color: var(--mauve);
+  box-shadow: none;
+}
+
+/* Dropdown */
+.p-dropdown {
+  background: var(--crust);
   border: 1px solid var(--surface1);
   border-radius: 6px;
-  padding: 0.3rem 0.5rem;
-}
-
-input[type="date"]:hover {
-  border-color: var(--surface2);
-  background: color-mix(in srgb, var(--surface0) 85%, black);
-}
-
-input[type="date"]:focus {
-  outline: none;
-  border-color: var(--mauve);
-}
-
-input[type="date"]::-webkit-datetime-edit {
   color: var(--text);
 }
 
-input[type="date"]::-webkit-datetime-edit-text {
+.p-dropdown:not(.p-disabled):hover {
+  border-color: var(--surface2);
+}
+
+.p-dropdown:not(.p-disabled).p-focus {
+  border-color: var(--mauve);
+  box-shadow: none;
+}
+
+.p-dropdown .p-dropdown-label {
+  color: var(--text);
+  padding: 0.35rem 0.6rem;
+}
+
+.p-dropdown .p-dropdown-label.p-placeholder {
   color: var(--subtext0);
 }
 
-input[type="date"]::-webkit-datetime-edit-day-field:focus,
-input[type="date"]::-webkit-datetime-edit-month-field:focus,
-input[type="date"]::-webkit-datetime-edit-year-field:focus {
+.p-dropdown .p-dropdown-trigger {
+  background: transparent;
+  color: var(--subtext0);
+  width: 1.8rem;
+}
+
+/* списки в оверлеях (Dropdown/AutoComplete) */
+.p-dropdown-panel,
+.p-autocomplete-panel,
+.p-datepicker {
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  border-radius: 8px;
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(17, 17, 27, 0.6);
+}
+
+.p-dropdown-item,
+.p-autocomplete-item {
+  color: var(--text);
+  padding: 0.35rem 0.6rem;
+  border-radius: 6px;
+}
+
+.p-dropdown-item:not(.p-highlight):not(.p-disabled):hover,
+.p-autocomplete-item:not(.p-highlight):not(.p-disabled):hover {
+  background: var(--surface0);
+}
+
+.p-dropdown-item.p-highlight,
+.p-autocomplete-item.p-highlight {
   background: var(--mauve);
   color: var(--crust);
+}
+
+.p-dropdown-item.p-disabled,
+.p-autocomplete-item.p-disabled {
+  opacity: 0.5;
+}
+
+.p-item-group {
+  color: var(--subtext0);
+}
+
+/* Checkbox */
+.p-checkbox-box {
+  background: var(--crust);
+  border: 1px solid var(--surface1);
   border-radius: 4px;
-  outline: none;
+  color: var(--crust);
 }
 
-input[type="date"]::-webkit-calendar-picker-indicator {
-  filter: invert(0.9);
-  opacity: 0.6;
-  cursor: pointer;
-  transition: opacity 120ms ease;
+.p-checkbox:not(.p-checkbox-disabled) .p-checkbox-box:hover {
+  border-color: var(--surface2);
 }
 
-input[type="date"]:hover::-webkit-calendar-picker-indicator {
-  opacity: 1;
+.p-checkbox:not(.p-checkbox-disabled) .p-checkbox-box.p-focus {
+  border-color: var(--mauve);
+  box-shadow: none;
 }
 
+.p-checkbox .p-checkbox-box.p-highlight {
+  background: var(--mauve);
+  border-color: var(--mauve);
+}
+
+/* ---- PrimeReact Calendar: поле + кнопка как один контрол ---- */
+/* тема lara-dark-purple задает цвета пикселями (#1f2937, #a78bfa), а не
+   переменными, поэтому перекрываем нужные селекторы явно (наши правила вне
+   @layer primereact и потому выигрывают каскад независимо от специфичности) */
+.datefield.p-calendar {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.datefield .p-inputtext {
+  min-width: 8.5rem;
+}
+
+.datefield.p-calendar-w-btn-right .p-inputtext {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.datefield.p-calendar-w-btn-left .p-inputtext {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.datefield .p-datepicker-trigger {
+  width: auto;
+  margin-left: -1px;
+  padding: 0 0.45rem;
+  border-radius: 0 6px 6px 0;
+  color: var(--subtext0);
+}
+
+.datefield.p-calendar-w-btn-left .p-datepicker-trigger {
+  margin: 0 -1px 0 0;
+  border-radius: 6px 0 0 6px;
+}
+
+.datefield .p-datepicker-trigger:enabled:hover,
+.datefield .p-datepicker-trigger:enabled:focus {
+  transform: none;
+  z-index: 1;
+  color: var(--mauve);
+  background: var(--surface0);
+  border-color: var(--surface2);
+  box-shadow: none;
+}
+
+/* ---- панель ---- */
+.p-datepicker {
+  padding: 0.4rem;
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  border-radius: 8px;
+  color: var(--text);
+  box-shadow: 0 8px 24px rgba(17, 17, 27, 0.6);
+  font-size: 0.9rem;
+}
+
+.p-datepicker .p-datepicker-header {
+  padding: 0.2rem 0.3rem;
+  background: transparent;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+}
+
+.p-datepicker .p-datepicker-header .p-datepicker-prev,
+.p-datepicker .p-datepicker-header .p-datepicker-next {
+  width: 1.7rem;
+  height: 1.7rem;
+  color: var(--subtext0);
+  background: transparent;
+  border: 0 none;
+  border-radius: 6px;
+}
+
+.p-datepicker .p-datepicker-header .p-datepicker-prev:enabled:hover,
+.p-datepicker .p-datepicker-header .p-datepicker-next:enabled:hover {
+  background: var(--surface0);
+  color: var(--mauve);
+}
+
+.p-datepicker .p-datepicker-header .p-datepicker-prev:focus-visible,
+.p-datepicker .p-datepicker-header .p-datepicker-next:focus-visible {
+  box-shadow: none;
+  outline: 1px solid var(--mauve);
+  outline-offset: -1px;
+}
+
+.p-datepicker .p-datepicker-header .p-datepicker-title {
+  line-height: 1.7rem;
+}
+
+.p-datepicker .p-datepicker-header .p-datepicker-title .p-datepicker-year,
+.p-datepicker .p-datepicker-header .p-datepicker-title .p-datepicker-month {
+  color: var(--text);
+  font-weight: 600;
+  padding: 0.15rem 0.4rem;
+  border-radius: 6px;
+}
+
+.p-datepicker .p-datepicker-header .p-datepicker-title .p-datepicker-year:enabled:hover,
+.p-datepicker .p-datepicker-header .p-datepicker-title .p-datepicker-month:enabled:hover {
+  color: var(--mauve);
+  background: var(--surface0);
+}
+
+.p-datepicker .p-datepicker-header .p-datepicker-title .p-datepicker-year:focus-visible,
+.p-datepicker .p-datepicker-header .p-datepicker-title .p-datepicker-month:focus-visible {
+  box-shadow: none;
+  outline: 1px solid var(--mauve);
+  outline-offset: -1px;
+}
+
+/* ---- сетка месяцев ---- */
+.p-datepicker table {
+  font-size: 0.85rem;
+  margin: 0.35rem 0;
+}
+
+.p-datepicker table th {
+  padding: 0.2rem;
+  color: var(--overlay1);
+  font-weight: 600;
+}
+
+.p-datepicker table th > span,
+.p-datepicker table td > span {
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 999px;
+}
+
+.p-datepicker table td {
+  padding: 0.1rem;
+}
+
+.p-datepicker table td > span {
+  color: var(--text);
+}
+
+.p-datepicker table td > span:not(.p-highlight):not(.p-disabled):hover {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+.p-datepicker table td > span.p-highlight {
+  background: var(--mauve);
+  color: var(--crust);
+  font-weight: 600;
+}
+
+.p-datepicker table td > span:focus {
+  box-shadow: none;
+  outline: 1px solid var(--mauve);
+  outline-offset: -1px;
+}
+
+.p-datepicker table td.p-datepicker-today > span {
+  color: var(--mauve);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--mauve);
+}
+
+.p-datepicker table td.p-datepicker-today > span.p-highlight {
+  color: var(--crust);
+  background: var(--mauve);
+}
+
+/* showOtherMonths: дни соседних месяцев иначе не отличимы от текущих */
+.p-datepicker table td.p-datepicker-other-month > span {
+  color: var(--overlay0);
+}
+
+.p-datepicker table td.p-datepicker-other-month > span:not(.p-highlight):not(.p-disabled):hover {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+.p-datepicker table td > span.p-disabled,
+.p-datepicker table td.p-disabled > span {
+  opacity: 0.35;
+  background: transparent;
+}
+
+/* ---- выбор месяца/года по клику на заголовок ---- */
+.p-datepicker .p-monthpicker,
+.p-datepicker .p-yearpicker {
+  margin: 0.4rem 0;
+}
+
+.p-datepicker .p-monthpicker .p-monthpicker-month,
+.p-datepicker .p-yearpicker .p-yearpicker-year {
+  padding: 0.4rem;
+  border-radius: 6px;
+  color: var(--text);
+}
+
+.p-datepicker .p-monthpicker .p-monthpicker-month:not(.p-highlight):hover,
+.p-datepicker .p-yearpicker .p-yearpicker-year:not(.p-highlight):hover {
+  background: var(--surface0);
+  color: var(--text);
+}
+
+.p-datepicker .p-monthpicker .p-monthpicker-month.p-highlight,
+.p-datepicker .p-yearpicker .p-yearpicker-year.p-highlight {
+  background: var(--mauve);
+  color: var(--crust);
+}
+
+.p-datepicker .p-monthpicker .p-monthpicker-month:focus,
+.p-datepicker .p-yearpicker .p-yearpicker-year:focus {
+  box-shadow: none;
+  outline: 1px solid var(--mauve);
+  outline-offset: -1px;
+}
+
+/* ---- кнопки «Сегодня» / «Очистить» ---- */
+.p-datepicker .p-datepicker-buttonbar {
+  padding: 0.4rem 0.1rem 0.1rem;
+  border-top: 1px solid var(--border);
+}
+
+.p-datepicker .p-datepicker-buttonbar .p-button {
+  width: auto;
+  padding: 0.25rem 0.6rem;
+  background: transparent;
+  border-color: transparent;
+  color: var(--subtext0);
+}
+
+.p-datepicker .p-datepicker-buttonbar .p-button:enabled:hover {
+  transform: none;
+  background: var(--surface0);
+  border-color: transparent;
+  color: var(--text);
+}
+
+.p-datepicker .p-datepicker-footer {
+  padding: 0.35rem 0.5rem;
+  color: var(--subtext0);
+  font-size: 0.8rem;
+}
+
+/* AutoComplete */
+.p-autocomplete .p-inputtext {
+  width: 100%;
+}
+
+/* ConfirmDialog */
+.p-dialog {
+  background: var(--mantle);
+  border: 1px solid var(--surface1);
+  border-radius: 12px;
+  color: var(--text);
+}
+
+.p-dialog .p-dialog-header {
+  background: var(--mantle);
+  color: var(--text);
+}
+
+.p-dialog .p-dialog-footer {
+  background: var(--mantle);
+}
+
+.p-button.guild-list-button,
+.guild-list .p-button {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+}

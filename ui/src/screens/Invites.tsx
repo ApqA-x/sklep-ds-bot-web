@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
+import { SelectButton } from "primereact/selectbutton";
 import {
   Bar,
   BarChart,
@@ -40,11 +41,13 @@ export default function Invites() {
   return (
     <>
       <div className="toolbar">
-        {PERIODS.map((p) => (
-          <button key={p} className={p === period ? "chip active" : "chip"} onClick={() => setPeriod(p)}>
-            {p}
-          </button>
-        ))}
+        <SelectButton
+          className="chip-group"
+          value={period}
+          options={PERIODS.map((p) => ({ label: p, value: p }))}
+          optionValue="value"
+          onChange={(e) => setPeriod(e.value as Period)}
+        />
       </div>
       {chart.length > 0 && (
         <Section title={`Привели участников (топ-${top})`}>

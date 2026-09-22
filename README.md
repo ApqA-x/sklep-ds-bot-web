@@ -87,7 +87,13 @@ workflow `publish.yml` соберёт `ghcr.io/apqa-x/sklep-ds-bot-web:0.1.0` (+
 | 4. Write-слой | ✅ (`api/models.py`, `api/mutations.py`, `api/write.py`, `web_audit_logs`, конфликт `expectedUpdatedAt`) |
 | 5. Discord-действия | ✅ (`api/bot.py`: роли/timeout/move/kick/сообщение/инвайты, rate-limit, audit) |
 | 6. UI управления | ✅ (форма настроек, списки trusted/autoUnmute/stalker, панель действий, страница аудита) |
+| 6b. UI-правки 2026-09-22 | ✅ (Catppuccin Mocha; имена вместо id через `GET /names`; `origin` web/discord в аудите + фильтр; экран «Чат» — см. ниже) |
 | 7. Прод | ⬜ требуется на хосте: OAuth env, reverse proxy, `docker stack deploy` (чеклист ниже) |
+
+> **История чата**: экран и read-API (`GET /chat/channels`, `GET /chat`) готовы и читают коллекцию
+> `voice_tracker.chat_messages`. Но **ни один из ботов сейчас туда не пишет** — writer в `sklep-ds-bot`
+> отсутствует, новый runtime (`D:\dashboard-mvp\estera-bot-runtime`) сообщения в БД не сохраняет.
+> Пока writer не добавлен, страница «Чат» пустая (в UI есть поясняющая заглушка).
 
 ## Чеклист прода-выката (этап 7, выполняется на Swarm-хосте)
 

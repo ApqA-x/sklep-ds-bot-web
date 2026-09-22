@@ -207,3 +207,21 @@ ENV (дополнить `bot/.env` на хосте): `MONGO_URI, MONGO_DB, DISCO
 - [x] Гильдии: **все, где присутствует бот** (список бот-токеном), с фильтром по правам пользователя; вайтлист `WEB_GUILD_IDS` не вводим.
 
 Свободных вопросов нет — можно стартовать с этапа 0.
+
+---
+
+## 11. UI-требования 2026-09-22 (реализовано)
+
+- **Catppuccin Mocha** — токены палитры в `ui/src/styles.css`; цвета графиков mauve/green.
+- **Имена вместо snowflake** — `GET /api/guild/{g}/names` → `{guildName, channels, roles, users}`:
+  каналы/роли/имя гильдии через бот-токен (кэш 300 с), пользователи из БД
+  (`voice_session_participants` за 90 дней + overrides из `member_nickname_state`).
+  UI: `useNames`/`DName` на всех экранах; без `DISCORD_TOKEN` каналы/роли деградируют до id.
+- **Источник действия в аудите** — поле `origin` в `web_audit_logs`: `web` (правка через сайт)
+  / `discord` (bot-действия через Discord API). `GET /audit?origin=`, бейджи и фильтр на странице Аудит.
+  Исторически записей с origin нет до этого релиза — старые документы отображаются как `web`.
+- **История чата** — просмотрщик реализован (`GET /chat/channels`, `GET /chat?channelId=&before=&limit=`,
+  экран «Чат») поверх коллекции `voice_tracker.chat_messages`
+  (`{guildId, channelId, messageId, authorUserId, authorName, content, sentAt, editedAt?, deletedAt?}`,
+  индекс `web_chat_guildId_channelId_sentAt`). ВНИМАНИЕ: ни `sklep-ds-bot`, ни новый runtime
+  (`D:\dashboard-mvp\estera-bot-runtime`) историю сообщений в БД НЕ пишут — у writer'а решение не принято.

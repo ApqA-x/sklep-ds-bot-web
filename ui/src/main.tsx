@@ -14,6 +14,7 @@ import UserProfile from "./screens/UserProfile";
 import Invites from "./screens/Invites";
 import Settings from "./screens/Settings";
 import Audit from "./screens/Audit";
+import Chat from "./screens/Chat";
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, refetchOnWindowFocus: false } },
@@ -37,6 +38,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="invites" element={<Invites />} />
                 <Route path="settings" element={<Settings />} />
                 <Route path="audit" element={<Audit />} />
+                <Route path="chat" element={<Chat />} />
               </Route>
               <Route path="*" element={<Navigate to="/" replace />} />
             </Route>

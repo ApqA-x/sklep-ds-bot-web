@@ -181,6 +181,30 @@ export type NamesPayload = {
   users: Record<string, string>;
 };
 
+export type ChatChannel = {
+  channelId: string;
+  count: number;
+  lastAt: string | null;
+};
+
+export type ChatMessage = {
+  messageId: string;
+  authorUserId: string;
+  authorName: string | null;
+  content: string;
+  sentAt: string;
+  editedAt: string | null;
+  deletedAt: string | null;
+};
+
+export type ChatMessagesPage = {
+  guildId: string;
+  channelId: string;
+  items: ChatMessage[];
+  hasMore: boolean;
+  nextBefore: string | null;
+};
+
 export type GuildAccess = {
   guildId: string;
   name: string;

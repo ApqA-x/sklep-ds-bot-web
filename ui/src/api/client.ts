@@ -2,6 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import type {
   ActiveSession,
   AuditPage,
+  ChatChannel,
+  ChatMessagesPage,
   GuildAccess,
   GuildSettingsDoc,
   Health,
@@ -116,6 +118,14 @@ export const api = {
     }),
 
   names: (guildId: string) => apiGet<NamesPayload>(`/api/guild/${guildId}/names`),
+
+  chatChannels: (guildId: string) =>
+    apiGet<{ guildId: string; items: ChatChannel[] }>(`/api/guild/${guildId}/chat/channels`),
+
+  chatMessages: (guildId: string, channelId: string, before?: string) =>
+    apiGet<ChatMessagesPage>(
+      `/api/guild/${guildId}/chat?channelId=${channelId}${before ? `&before=${encodeURIComponent(before)}` : ""}`,
+    ),
 
   audit: (guildId: string, page = 1, size = 50, origin?: "web" | "discord") =>
     apiGet<AuditPage>(

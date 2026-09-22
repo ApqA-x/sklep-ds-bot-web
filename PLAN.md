@@ -223,6 +223,6 @@ ENV (дополнить `bot/.env` на хосте): `MONGO_URI, MONGO_DB, DISCO
 - **История чата** — просмотрщик реализован (`GET /chat/channels`, `GET /chat?channelId=&before=&limit=`,
   экран «Чат») поверх коллекции `voice_tracker.chat_messages`
   (`{guildId, channelId, messageId, authorUserId, authorName, content, sentAt, editedAt?, deletedAt?}`,
-  индекс `web_chat_guildId_channelId_sentAt`). Writer добавлен в живой `dsbot-gateway`
+  индекс `chat_guildId_channelId_sentAt`). Writer добавлен в живой `dsbot-gateway`
   (`D:\dsbot`: `voice_tracker/repository.py` + `services/gateway.py`; на 2026-09-22 — не закоммичен
   в том репозитории): create/edit/delete сообщений пишутся с фильтром по гильдиям из конфига.

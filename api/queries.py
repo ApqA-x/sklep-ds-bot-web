@@ -480,7 +480,9 @@ WEB_INDEXES: list[tuple[str, list[tuple[str, int]], str]] = [
     (COLL_PARTICIPANTS, [("guildId", 1), ("joinedAt", 1)], "web_guildId_joinedAt"),
     (COLL_SESSIONS, [("guildId", 1), ("status", 1), ("endedAt", -1)], "web_guildId_status_endedAt"),
     ("web_audit_logs", [("guildId", 1), ("at", -1)], "web_audit_guildId_at"),
-    (COLL_CHAT, [("guildId", 1), ("channelId", 1), ("sentAt", -1)], "web_chat_guildId_channelId_sentAt"),
+    # имя совпадает с индексом writer'а бота (dsbot ensure_indexes) — иначе Mongo считает это
+    # «тот же ключ под другим именем» (code 85) и пересоздание конфликует
+    (COLL_CHAT, [("guildId", 1), ("channelId", 1), ("sentAt", -1)], "chat_guildId_channelId_sentAt"),
 ]
 
 

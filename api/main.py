@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import logging
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.responses import Response
 
+from . import read as read_api
 from .config import WebConfig, load_config
+from .queries import ensure_web_indexes
 
 API_DIR = Path(__file__).resolve().parent
 UI_DIST = (API_DIR.parent / "ui" / "dist").resolve()
@@ -39,17 +42,39 @@ def _static_file(full_path: str) -> Path | None:
     return candidate
 
 
-def create_app(config: WebConfig | None = None, mongo_client: object | None = None) -> FastAPI:
+def create_app(
+    config: WebConfig | None = None,
+    mongo_client: object | None = None,
+    db: object | None = None,
+) -> FastAPI:
     cfg = config or load_config()
     logging.basicConfig(
         level=getattr(logging, cfg.log_level, logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 
-    app = FastAPI(title="sklep-ds-bot-web", version=VERSION, docs_url=None, redoc_url=None)
+    log = logging.getLogger("api")
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        database = getattr(app.state, "db", None)
+        if database is not None:
+            try:
+                log.info("web indexes: %s", ensure_web_indexes(database))
+            except Exception:
+                log.warning("web index creation failed", exc_info=True)
+        yield
+
+    app = FastAPI(
+        title="sklep-ds-bot-web",
+        version=VERSION,
+        docs_url=None,
+        redoc_url=None,
+        lifespan=lifespan,
+    )
     app.state.config = cfg
 
-    if mongo_client is None and cfg.mongo_uri:
+    if db is None and mongo_client is None and cfg.mongo_uri:
         try:
             from pymongo import MongoClient
 
@@ -61,7 +86,9 @@ def create_app(config: WebConfig | None = None, mongo_client: object | None = No
         except Exception:
             mongo_client = None
     app.state.mongo = mongo_client
-    if mongo_client is not None and cfg.mongo_db:
+    if db is not None:
+        app.state.db = db
+    elif mongo_client is not None and cfg.mongo_db:
         app.state.db = mongo_client[cfg.mongo_db]
     else:
         app.state.db = None
@@ -87,6 +114,8 @@ def create_app(config: WebConfig | None = None, mongo_client: object | None = No
             "auth_enabled": cfg.auth_enabled,
         }
         return JSONResponse(payload, status_code=200)
+
+    app.include_router(read_api.router)
 
     # SPA catch-all: serve built ui/dist assets, fall back to index.html for client routes.
     @app.get("/{full_path:path}", response_model=None)

@@ -1,4 +1,4 @@
-# sklep-bot-web — веб-часть voice_tracker (чтение + управление)
+# sklep-ds-bot-web — веб-часть voice_tracker (чтение + управление)
 
 Независимое приложение: React SPA + FastAPI в одном контейнере.
 Полный план и контракты: [`PLAN.md`](PLAN.md) (этапы, API, безопасность).
@@ -17,7 +17,7 @@ api/tests/     pytest (self-made fake mongo)
 ui/            React SPA (Vite)
 Dockerfile     multi-stage: npm build → python:3.12-slim (SPA отдаётся FastAPI, same-origin)
 docker-compose.yml   локальный dev (mongo + web)
-.github/workflows/publish.yml  образ ghcr.io/apqa-x/sklep-bot-web (amd64+arm64)
+.github/workflows/publish.yml  образ ghcr.io/apqa-x/sklep-ds-bot-web (amd64+arm64)
 ```
 
 ## Локальный запуск
@@ -73,7 +73,7 @@ python -m pytest api/tests -q
 git tag v0.1.0 && "/mnt/c/Program Files/Git/cmd/git.exe" push origin v0.1.0
 ```
 
-workflow `publish.yml` соберёт `ghcr.io/apqa-x/sklep-bot-web:0.1.0` (+ `:latest`).
+workflow `publish.yml` соберёт `ghcr.io/apqa-x/sklep-ds-bot-web:0.1.0` (+ `:latest`).
 В проде сервис `web` стека `bot/docker-stack.yaml` пинить тегом `v*`, не `:latest`.
 
 ## Статус этапов

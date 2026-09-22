@@ -46,7 +46,7 @@ def create_app(config: WebConfig | None = None, mongo_client: object | None = No
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 
-    app = FastAPI(title="sklep-bot-web", version=VERSION, docs_url=None, redoc_url=None)
+    app = FastAPI(title="sklep-ds-bot-web", version=VERSION, docs_url=None, redoc_url=None)
     app.state.config = cfg
 
     if mongo_client is None and cfg.mongo_uri:

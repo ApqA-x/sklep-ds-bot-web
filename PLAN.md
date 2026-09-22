@@ -3,7 +3,7 @@
 > Дата: 2026-09-22. Репозиторий: `sklep-ds-bot-web` (новый, пока пустой).
 > Родственный проект: `sklep-ds-bot` (Discord voice-трекер, Python, 6 микросервисов + MongoDB 7 + NATS).
 > Предыстория: `docs/website-plan.md` в sklep-ds-bot (этапы 0–6 реализованы в 09/2026 в read-only варианте).
-> ⚠️ Код того дашборда **утерян**: репозиторий `ApqA-x/sklep-bot-web` на GitHub пуст (push коммита `aff0211` не состоялся), локальных копий нет.
+> ⚠️ Код того дашборда **утерян**: репозиторий `ApqA-x/sklep-bot-web` (переименован в `ApqA-x/sklep-ds-bot-web`) на GitHub пуст (push коммита `aff0211` не состоялся), локальных копий нет.
 > Настоящий план восстанавливает его контракты из `website-plan.md` §4/§10/§11 и расширяет область: сайт получает **запись в БД и управление ботом**.
 
 ---
@@ -149,7 +149,7 @@ sklep-ds-bot-web/
 ├── ui/                  # React SPA (Vite)
 ├── Dockerfile           # multi-stage: npm build → python:3.12-slim + static
 ├── docker-compose.yml   # локально: mongo + api
-├── .github/workflows/publish.yml   # образ ghcr.io/apqa-x/sklep-bot-web (pin v*)
+├── .github/workflows/publish.yml   # образ ghcr.io/apqa-x/sklep-ds-bot-web (pin v*)
 └── README.md            # запуск, ENV
 ```
 
@@ -195,7 +195,7 @@ ENV (дополнить `bot/.env` на хосте): `MONGO_URI, MONGO_DB, DISCO
 - **DISCORD_TOKEN в web-контейнере** — новая поверхность компрометации: контейнер без входящих портов кроме proxy, только allowlist-вызовы, audit.
 - **Нагрузка на Mongo** — прежние правила (§4.1).
 - **Ответственность за деструктивные действия** (kick/timeout): confirm в UI + причина обязательна + audit; при необходимости сузить вайтлистом действий.
-- **Потеря кода** (уже случилась): с самого начала коммитим в `ApqA-x/sklep-bot-web` после каждого этапа; push — Windows-git (GCM), не WSL.
+- **Потеря кода** (уже случилась): с самого начала коммитим в `ApqA-x/sklep-ds-bot-web` после каждого этапа; push — Windows-git (GCM), не WSL.
 
 ---
 

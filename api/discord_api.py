@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from typing import Any
+from urllib.parse import quote
 
 import aiohttp
 
@@ -18,6 +19,27 @@ class DiscordError(RuntimeError):
         self.op = op
         self.status = status
         self.body = body
+
+
+async def bot_request(
+    cfg: WebConfig,
+    method: str,
+    path: str,
+    *,
+    json_body: dict | None = None,
+    reason: str | None = None,
+) -> tuple[int, Any]:
+    """Bot-token call to Discord REST; returns (status, payload). No exception on 4xx."""
+    headers = {"Authorization": f"Bot {cfg.discord_token}"}
+    if reason:
+        headers["X-Audit-Log-Reason"] = quote(reason)
+    async with aiohttp.ClientSession(headers=headers) as session:
+        async with session.request(method, f"{API}{path}", json=json_body) as response:
+            try:
+                payload = await response.json()
+            except Exception:
+                payload = {"raw": (await response.text())[:300]}
+            return response.status, payload
 
 
 async def _get_json(url: str, headers: dict[str, str], *, op: str) -> Any:

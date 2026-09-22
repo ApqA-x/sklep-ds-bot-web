@@ -130,3 +130,88 @@ class StalkerAction(BaseModel):
         if not value.strip() or not SNOWFLAKE_RE.match(value.strip()):
             raise ValueError("user id must be a Discord snowflake")
         return value.strip()
+
+
+class MemberRoleAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    roleId: str
+    action: Literal["grant", "revoke"]
+
+    @field_validator("roleId")
+    @classmethod
+    def _rid(cls, value: str) -> str:
+        return _check_id(value, "roleId")
+
+
+class TimeoutMemberAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mute: bool
+    seconds: int = 600
+
+    @field_validator("seconds")
+    @classmethod
+    def _seconds(cls, value: int) -> int:
+        if not 60 <= value <= 604_800:
+            raise ValueError("seconds must be between 60 and 604800")
+        return value
+
+
+class MoveMemberAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    channelId: str
+
+    @field_validator("channelId")
+    @classmethod
+    def _cid(cls, value: str) -> str:
+        return _check_id(value, "channelId")
+
+
+class KickMemberAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str
+
+    @field_validator("reason")
+    @classmethod
+    def _reason(cls, value: str) -> str:
+        value = value.strip()
+        if not 1 <= len(value) <= 500:
+            raise ValueError("reason must be 1..500 characters")
+        return value
+
+
+class ChannelMessageAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    content: str
+
+    @field_validator("content")
+    @classmethod
+    def _content(cls, value: str) -> str:
+        value = value.strip()
+        if not 1 <= len(value) <= 2000:
+            raise ValueError("content must be 1..2000 characters")
+        return value
+
+
+class InviteCreateAction(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    channelId: str
+    maxAge: int = 86400
+    maxUses: int = 0
+
+    @field_validator("channelId")
+    @classmethod
+    def _cid(cls, value: str) -> str:
+        return _check_id(value, "channelId")
+
+    @field_validator("maxAge")
+    @classmethod
+    def _age(cls, value: int) -> int:
+        if not 0 <= value <= 604_800:
+            raise ValueError("maxAge must be between 0 and 604800")
+        return value

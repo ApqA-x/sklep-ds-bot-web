@@ -34,7 +34,7 @@ def _clear_recheck_cache() -> None:
     _recheck_cache.clear()
 
 
-async def _perms_for(request: Request, guild_id: str) -> int:
+async def perms_for(request: Request, guild_id: str) -> int:
     """Session perms with a fresh Discord re-check (TTL 60s) when auth is enabled."""
     cfg = _cfg(request)
     if not cfg.auth_enabled:
@@ -62,14 +62,14 @@ async def _perms_for(request: Request, guild_id: str) -> int:
 
 async def require_guild_read(request: Request) -> None:
     guild_id = request.path_params.get("guildId", "")
-    perms = await _perms_for(request, guild_id)
+    perms = await perms_for(request, guild_id)
     if not perms & (MANAGE_GUILD | ADMINISTRATOR):
         raise HTTPException(status_code=403, detail="manage guild permission required")
 
 
 async def require_guild_admin(request: Request) -> None:
     guild_id = request.path_params.get("guildId", "")
-    perms = await _perms_for(request, guild_id)
+    perms = await perms_for(request, guild_id)
     if not perms & ADMINISTRATOR:
         raise HTTPException(status_code=403, detail="administrator permission required")
 

@@ -231,7 +231,8 @@ button:disabled {
   background: color-mix(in srgb, var(--surface0) 72%, black);
 }
 
-.tab .count-badge {
+.tab .count-badge,
+.chip .count-badge {
   display: inline-block;
   margin-left: 0.35rem;
   padding: 0 0.45rem;
@@ -900,6 +901,37 @@ button.danger:hover:not(:disabled) {
 
 .online-user:hover {
   color: var(--mauve);
+}
+
+.online-sessions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.online-session {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--crust);
+  padding: 0.6rem 0.8rem;
+}
+
+.online-session-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+
+.session-timer {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--mauve);
+  border: 1px solid var(--surface2);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  background: var(--surface0);
 }
 
 .intervals {

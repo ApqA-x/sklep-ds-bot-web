@@ -166,12 +166,11 @@ def build_invites_by_inviter_pipeline(guild_id: str, cutoff: datetime | None, li
     ]
 
 
-def build_member_search_pipeline(guild_id: str, query: str, cutoff: datetime, limit: int) -> list[dict]:
+def build_member_search_pipeline(guild_id: str, query: str, limit: int) -> list[dict]:
     return [
         {
             "$match": {
                 "guildId": guild_id,
-                "joinedAt": {"$gte": cutoff},
                 "userName": {"$regex": re.escape(query), "$options": "i"},
             }
         },
@@ -340,6 +339,9 @@ def user_profile(db: Any, guild_id: str, user_id: str, period: str) -> dict | No
     if cutoff is not None:
         msg_where["sentAt"] = {"$gte": cutoff}
     message_count = int(db[COLL_CHAT].count_documents(msg_where))
+    invited_count = int(
+        db[COLL_JOIN_ATTRIBUTIONS].count_documents({"guildId": guild_id, "inviterUserId": user_id})
+    )
     return {
         "guildId": guild_id,
         "userId": user_id,
@@ -348,6 +350,7 @@ def user_profile(db: Any, guild_id: str, user_id: str, period: str) -> dict | No
         "totalMs": int(totals.get("totalMs") or 0),
         "appearances": int(totals.get("appearances") or 0),
         "messageCount": message_count,
+        "invitedCount": invited_count,
         "daily": daily,
         "roleIds": [str(r) for r in (role_state or {}).get("roleIds") or []],
         "nicknames": nicknames,
@@ -433,8 +436,7 @@ def stalker_subscriptions(db: Any, guild_id: str) -> list[dict]:
 
 
 def search_members(db: Any, guild_id: str, query: str, limit: int) -> list[dict]:
-    cutoff = _utc_now() - ACTIVE_MEMBER_SEARCH_WINDOW
-    rows = db[COLL_PARTICIPANTS].aggregate(build_member_search_pipeline(guild_id, query, cutoff, limit))
+    rows = db[COLL_PARTICIPANTS].aggregate(build_member_search_pipeline(guild_id, query, limit))
     return [{"userId": str(row["_id"]), "userName": row.get("userName") or "unknown"} for row in rows]
 
 

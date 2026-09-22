@@ -155,7 +155,7 @@ export default function Chat() {
                 <h4>Автор сообщений</h4>
                 <TargetUserPicker
                   guildId={guildId}
-                  placeholder="автор сообщения…"
+                  placeholder="имя автора (от 2 символов) или id"
                   value={filters.userId}
                   onChange={(id) => set({ userId: id })}
                 />

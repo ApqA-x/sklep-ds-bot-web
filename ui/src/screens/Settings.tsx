@@ -4,6 +4,7 @@ import { useParams } from "react-router-dom";
 import { api, useCanWrite } from "../api/client";
 import type { VoiceChannelOption } from "../api/types";
 import { ErrorBox, Loading, Section } from "../components/ui";
+import { TargetUserPicker } from "../components/userSearch";
 import { DName, type NameKind } from "../names";
 import { usePicker } from "../names";
 
@@ -147,14 +148,28 @@ function IdList({
   busy: boolean;
   options?: VoiceChannelOption[];
 }) {
+  const { guildId = "" } = useParams();
   const [input, setInput] = useState("");
   const [manual, setManual] = useState(false);
+  const [picked, setPicked] = useState("");
   const select = options && options.length > 0;
+  const userSearch = kind === "user" && !select;
   return (
     <div className="idlist">
       <div className="idlist-head">
         <strong>{title}</strong>
-        {!disabled && (
+        {!disabled &&
+          (userSearch ? (
+            <TargetUserPicker
+              guildId={guildId}
+              placeholder="имя пользователя (от 2 символов) или id"
+              value={picked}
+              onChange={(id) => {
+                setPicked(id);
+                if (id) onAdd(id);
+              }}
+            />
+          ) : (
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -197,7 +212,7 @@ function IdList({
               добавить
             </button>
           </form>
-        )}
+          ))}
       </div>
       <div className="chips">
         {ids.length === 0 && <span className="muted">пусто</span>}
@@ -324,11 +339,17 @@ export default function Settings() {
             disabled={!canWrite}
             onChange={(e) => set("trackingMode", e.target.value)}
           >
-            <option value="all">all</option>
-            <option value="none">none</option>
-            <option value="specific">specific</option>
+            <option value="all">all — все голосовые каналы</option>
+            <option value="none">none — не трековать</option>
+            <option value="specific">specific — только выбранные каналы</option>
           </select>
         </label>
+        <p className="muted tiny">
+          <strong>all</strong> — бот пишет голосовые сессии по всем голосовым каналам сервера.{" "}
+          <strong>none</strong> — трекинг полностью выключен, сессии не создаются.{" "}
+          <strong>specific</strong> — сессии считаются только в каналах из списка «Трекаемые каналы» ниже;
+          остальные каналы игнорируются.
+        </p>
         {form.trackingMode === "specific" && (
           <IdList
             title="Трекаемые каналы"
@@ -453,10 +474,17 @@ export default function Settings() {
             checked={Boolean(form.soundboardEnforcementEnabled)}
             onChange={(e) => set("soundboardEnforcementEnabled", e.target.checked)}
           />
-          soundboardEnforcementEnabled
+          <span>
+            Soundboard-модерация
+            <span className="muted tiny">
+              {" "}
+              — если участник включает звук саундборда в курируемом ботом голосовом канале, бот отключит его от
+              голоса
+            </span>
+          </span>
         </label>
         <label className="field">
-          <span>autoRoleId</span>
+          <span>Autorole</span>
           {roleOptions.length > 0 ? (
             <select
               value={String(form.autoRoleId ?? "")}
@@ -478,6 +506,9 @@ export default function Settings() {
             />
           )}
           <NameHint kind="role" value={form.autoRoleId} />
+          <span className="muted tiny">
+            Роль, которую бот выдаёт новичку при входе по чужому приглашению (автороль за реферал).
+          </span>
         </label>
       </Section>
       <Section title="Списки">
@@ -539,17 +570,22 @@ export default function Settings() {
             onSubmit={(e) => {
               e.preventDefault();
               stalker.mutate({ watcher: stalkerForm.watcher, target: stalkerForm.target, action: "add" });
+              setStalkerForm({ watcher: "", target: "" });
             }}
           >
-            <input
-              placeholder="watcher id"
+            <span className="muted tiny">Следит:</span>
+            <TargetUserPicker
+              guildId={guildId}
+              placeholder="имя (от 2 символов) или id"
               value={stalkerForm.watcher}
-              onChange={(e) => setStalkerForm((f) => ({ ...f, watcher: e.target.value }))}
+              onChange={(id) => setStalkerForm((f) => ({ ...f, watcher: id }))}
             />
-            <input
-              placeholder="target id"
+            <span className="muted tiny">За кем:</span>
+            <TargetUserPicker
+              guildId={guildId}
+              placeholder="имя (от 2 символов) или id"
               value={stalkerForm.target}
-              onChange={(e) => setStalkerForm((f) => ({ ...f, target: e.target.value }))}
+              onChange={(id) => setStalkerForm((f) => ({ ...f, target: id }))}
             />
             <button
               type="submit"

@@ -74,7 +74,7 @@ export default function UserProfile() {
             {p.userId}
           </a>{" "}
           · заходов за период: {p.appearances} · время: {fmtDuration(p.totalMs)} · сообщений:{" "}
-          {p.messageCount.toLocaleString("ru-RU")}
+          {p.messageCount.toLocaleString("ru-RU")} · пригласил: {p.invitedCount}
         </p>
         {daily.length > 0 && (
           <div className="chart">

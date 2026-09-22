@@ -106,6 +106,7 @@ export type UserProfile = {
   totalMs: number;
   appearances: number;
   messageCount: number;
+  invitedCount: number;
   daily: DailyUsage[];
   roleIds: string[];
   nicknames: NicknameChange[];

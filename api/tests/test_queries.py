@@ -52,7 +52,7 @@ def test_invites_by_inviter_pipeline_requires_inviter() -> None:
 
 
 def test_member_search_pipeline_escapes_regex() -> None:
-    pipeline = queries.build_member_search_pipeline("9", "an.na*m", _dt(3), 10)
+    pipeline = queries.build_member_search_pipeline("9", "an.na*m", 10)
     pattern = pipeline[0]["$match"]["userName"]["$regex"]
     assert pattern == re.escape("an.na*m")
     assert re.match(pattern, "an.na*m") is not None
@@ -201,6 +201,12 @@ def test_user_profile_none_for_unknown_and_full_for_known() -> None:
         {"guildId": "1", "authorUserId": "43", "sentAt": _dt(9)},
         {"guildId": "2", "authorUserId": "42", "sentAt": _dt(9)},
     ])
+    db[queries.COLL_JOIN_ATTRIBUTIONS] = FakeCollection(queries.COLL_JOIN_ATTRIBUTIONS, docs=[
+        {"guildId": "1", "userId": "a", "inviterUserId": "42", "joinedAt": _dt(5)},
+        {"guildId": "1", "userId": "b", "inviterUserId": "42", "joinedAt": _dt(6)},
+        {"guildId": "1", "userId": "c", "inviterUserId": "43", "joinedAt": _dt(7)},
+        {"guildId": "2", "userId": "d", "inviterUserId": "42", "joinedAt": _dt(7)},
+    ])
 
     profile = queries.user_profile(db, "1", "42", "30d")
     assert profile is not None
@@ -215,6 +221,7 @@ def test_user_profile_none_for_unknown_and_full_for_known() -> None:
 
     profile_all = queries.user_profile(db, "1", "42", "all")
     assert profile_all is not None and profile_all["messageCount"] == 3
+    assert profile_all["invitedCount"] == 2
 
 
 def test_invites_overview_sections_and_cache() -> None:

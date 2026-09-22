@@ -191,15 +191,12 @@ async def list_guilds(request: Request):
         bot_guilds = await discord_api.bot_guilds(cfg)
     except discord_api.DiscordError as err:
         log.warning("bot guild list failed: %s", err)
-    if not bot_guilds and not cfg.auth_enabled:
-        db = getattr(request.app.state, "db", None)
-        if db is not None:
-            names = {}
-            for doc in db["guild_settings"].find({}, projection={"_id": 1}):
-                names[str(doc["_id"])] = ""
-            return {"guilds": [{"guildId": gid, "name": name or gid, "canRead": True, "canWrite": True} for gid, name in names.items()]}
     names = _guild_names(bot_guilds)
     if not cfg.auth_enabled:
+        db = getattr(request.app.state, "db", None)
+        if db is not None:
+            for doc in db["guild_settings"].find({}, projection={"_id": 1}):
+                names.setdefault(str(doc["_id"]), "")
         return {
             "guilds": [
                 {"guildId": gid, "name": name or gid, "canRead": True, "canWrite": True}

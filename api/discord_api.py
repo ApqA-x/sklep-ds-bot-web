@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from typing import Any
 from urllib.parse import quote
@@ -7,6 +8,8 @@ from urllib.parse import quote
 import aiohttp
 
 from .config import WebConfig
+
+log = logging.getLogger(__name__)
 
 API = "https://discord.com/api/v10"
 _BOT_GUILD_CACHE: dict[str, tuple[float, list[dict[str, Any]]]] = {}
@@ -80,10 +83,14 @@ async def fetch_bot_guilds(cfg: WebConfig) -> list[dict[str, Any]]:
         return []
     headers = {"Authorization": f"Bot {cfg.discord_token}"}
     if cfg.discord_application_id:
-        rows = await _get_json(
-            f"{API}/applications/{cfg.discord_application_id}/guilds", headers, op="bot_guilds"
-        )
-        return rows or []
+        try:
+            rows = await _get_json(
+                f"{API}/applications/{cfg.discord_application_id}/guilds", headers, op="bot_guilds"
+            )
+            if rows:
+                return rows
+        except DiscordError as err:
+            log.warning("application guild list unavailable (%s), falling back to bot guilds", err)
     return await _get_json(f"{API}/users/@me/guilds", headers, op="bot_guilds") or []
 
 
@@ -130,8 +137,17 @@ async def guild_channels_raw(cfg: WebConfig, guild_id: str) -> list[dict[str, An
     return await _guild_resource_rows(cfg, guild_id, "channels")
 
 
+async def bot_user_id(cfg: WebConfig) -> str | None:
+    """The bot's own user id (== application id); the bot user object as fallback."""
+    if cfg.discord_application_id:
+        return cfg.discord_application_id
+    headers = {"Authorization": f"Bot {cfg.discord_token}"}
+    me = await _get_json(f"{API}/users/@me", headers, op="bot_me")
+    return str(me.get("id") or "") or None
+
+
 async def bot_top_role_position(cfg: WebConfig, guild_id: str) -> int | None:
-    """Position of the bot's highest role in a guild, or None when no bot token."""
+    """Position of the bot's highest role in a guild, or None when it cannot be determined."""
     if not cfg.discord_token:
         return None
     key = (guild_id, "topRolePosition")
@@ -139,7 +155,13 @@ async def bot_top_role_position(cfg: WebConfig, guild_id: str) -> int | None:
     if cached is not None and time.monotonic() - cached[0] < _GUILD_RESOURCE_TTL:
         return cached[1]
     headers = {"Authorization": f"Bot {cfg.discord_token}"}
-    member = await _get_json(f"{API}/guilds/{guild_id}/members/@me", headers, op="bot_member")
+    try:
+        me_id = await bot_user_id(cfg)
+        member = await _get_json(f"{API}/guilds/{guild_id}/members/{me_id}", headers, op="bot_member")
+    except DiscordError as err:
+        log.warning("bot member lookup failed in guild %s (%s); treating all unmanaged roles as assignable", guild_id, err)
+        _GUILD_RESOURCE_CACHE[key] = (time.monotonic(), None)
+        return None
     bot_role_ids = {str(rid) for rid in member.get("roles", [])}
     rows = await _guild_resource_rows(cfg, guild_id, "roles")
     top = max((int(row.get("position") or 0) for row in rows if str(row.get("id")) in bot_role_ids), default=0)

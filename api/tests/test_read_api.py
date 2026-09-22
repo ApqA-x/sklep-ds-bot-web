@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 
 from fastapi.testclient import TestClient
@@ -198,6 +199,56 @@ def test_picker_endpoint_without_token_returns_empty_lists() -> None:
     body = response.json()
     assert body == {"guildId": GUILD, "roles": [], "voiceChannels": []}
     assert client.get("/api/guild/abc/picker").status_code == 422
+
+
+def test_fetch_bot_guilds_falls_back_when_application_endpoint_fails(monkeypatch) -> None:
+    from api import discord_api
+
+    async def fake_get_json(url, headers, *, op):
+        if "applications/" in url:
+            raise discord_api.DiscordError(op, 404, {"message": "404: Not Found"})
+        return [{"id": GUILD, "name": "Гильдия"}]
+
+    monkeypatch.setattr(discord_api, "_get_json", fake_get_json)
+    cfg = WebConfig(mongo_uri="", mongo_db="", discord_token="t", discord_application_id="999")
+    guilds = asyncio.run(discord_api.fetch_bot_guilds(cfg))
+    assert guilds == [{"id": GUILD, "name": "Гильдия"}]
+
+
+def test_bot_top_role_position_degrades_to_none_on_member_error(monkeypatch) -> None:
+    from api import discord_api
+
+    async def fake_get_json(url, headers, *, op):
+        if "/members/" in url:
+            raise discord_api.DiscordError(op, 50035, {"message": "Invalid Form Body"})
+        raise AssertionError(f"unexpected url {url}")
+
+    monkeypatch.setattr(discord_api, "_get_json", fake_get_json)
+    cfg = WebConfig(mongo_uri="", mongo_db="", discord_token="t", discord_application_id="123")
+    assert asyncio.run(discord_api.bot_top_role_position(cfg, GUILD)) is None
+
+
+def test_picker_keeps_roles_when_bot_hierarchy_unknown(monkeypatch) -> None:
+    from api import discord_api
+
+    role_rows = [{"id": "1", "name": "Mod", "position": 5, "color": 0xA6E3A1}]
+
+    async def fake_roles(cfg, guild):
+        return role_rows
+
+    async def fake_channels(cfg, guild):
+        return []
+
+    async def fake_top(cfg, guild):
+        raise discord_api.DiscordError("bot_member", 400, {"message": "no"})
+
+    monkeypatch.setattr(discord_api, "guild_roles_raw", fake_roles)
+    monkeypatch.setattr(discord_api, "guild_channels_raw", fake_channels)
+    monkeypatch.setattr(discord_api, "bot_top_role_position", fake_top)
+    client = _client(FakeDB())
+    body = client.get(f"/api/guild/{GUILD}/picker").json()
+    assert [r["id"] for r in body["roles"]] == ["1"]
+    assert body["roles"][0]["assignable"] is True  # иерархия неизвестна — не скрываем роли
 
 
 def test_build_role_options_rules() -> None:

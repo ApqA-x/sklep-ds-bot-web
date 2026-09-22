@@ -10,6 +10,7 @@ import type {
   InvitesOverview,
   Leaderboard,
   MemberHit,
+  MemberState,
   NamesPayload,
   Period,
   PickerPayload,
@@ -122,6 +123,9 @@ export const api = {
 
   picker: (guildId: string) => apiGet<PickerPayload>(`/api/guild/${guildId}/picker`),
 
+  memberState: (guildId: string, userId: string) =>
+    apiGet<MemberState>(`/api/guild/${guildId}/users/${userId}/member`),
+
   chatChannels: (guildId: string) =>
     apiGet<{ guildId: string; items: ChatChannel[] }>(`/api/guild/${guildId}/chat/channels`),
 
@@ -143,6 +147,9 @@ export const api = {
 
   botMove: (guildId: string, userId: string, channelId: string) =>
     apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/member/${userId}/move`, { channelId }),
+
+  botDisconnect: (guildId: string, userId: string) =>
+    apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/member/${userId}/disconnect`, {}),
 
   botKick: (guildId: string, userId: string, reason: string) =>
     apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/member/${userId}/kick`, { reason }),

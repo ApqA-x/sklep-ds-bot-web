@@ -209,6 +209,19 @@ def build_voice_channels(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+async def get_member(cfg: WebConfig, guild_id: str, user_id: str) -> dict[str, Any] | None:
+    """Raw guild member via bot token; None when the user is not a member."""
+    if not cfg.discord_token:
+        return None
+    headers = {"Authorization": f"Bot {cfg.discord_token}"}
+    try:
+        return await _get_json(f"{API}/guilds/{guild_id}/members/{user_id}", headers, op="member")
+    except DiscordError as err:
+        if err.status == 404:
+            return None
+        raise
+
+
 async def member_permissions(cfg: WebConfig, guild_id: str, user_id: str) -> int | None:
     """Computed permissions bitfield of a member via bot token, or None if not a member."""
     if not cfg.discord_token:

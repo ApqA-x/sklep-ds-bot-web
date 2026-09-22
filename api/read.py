@@ -134,6 +134,32 @@ def search_members(
     return {"guildId": guild, "q": q, "items": queries.search_members(_db(request), guild, q, limit)}
 
 
+@router.get("/users/{userId}/member")
+async def member_state(request: Request, guildId: str, userId: str) -> dict:
+    """Живое состояние участника из Discord: роли, тайм-аут, голосовой канал."""
+    guild = _snowflake(guildId, "guildId")
+    user = _snowflake(userId, "userId")
+    from . import discord_api
+
+    cfg = request.app.state.config
+    try:
+        member = await discord_api.get_member(cfg, guild, user)
+    except discord_api.DiscordError:
+        member = None
+    if member is None:
+        return {"guildId": guild, "userId": user, "source": "unavailable",
+                "roleIds": None, "timeoutUntil": None, "voiceChannelId": None}
+    voice = member.get("voice") or {}
+    return {
+        "guildId": guild,
+        "userId": user,
+        "source": "discord",
+        "roleIds": [str(r) for r in member.get("roles") or []],
+        "timeoutUntil": member.get("communication_disabled_until"),
+        "voiceChannelId": (str(voice["channel_id"]) if voice.get("channel_id") else None),
+    }
+
+
 @router.get("/chat/channels")
 def chat_channels(request: Request, guildId: str) -> dict:
     guild = _snowflake(guildId, "guildId")

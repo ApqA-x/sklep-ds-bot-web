@@ -20,6 +20,16 @@ export function usePicker(guildId: string) {
   });
 }
 
+// Живое состояние участника (роли/тайм-аут/войс) — только для записи, короткая свежесть.
+export function useMemberState(guildId: string, userId: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["memberState", guildId, userId],
+    queryFn: () => api.memberState(guildId, userId),
+    enabled: enabled && /^\d{5,25}$/.test(guildId) && /^\d{5,25}$/.test(userId),
+    staleTime: 15_000,
+  });
+}
+
 export type NameKind = "user" | "channel" | "role" | "guild";
 
 export function nameOf(names: NamesPayload | undefined, kind: NameKind, id: string): string {

@@ -14,7 +14,7 @@ import { api, useCanWrite } from "../api/client";
 import type { Period } from "../api/types";
 import { Empty, ErrorBox, Loading, OptionSelect, roleColorCss, Section, type PickerOption } from "../components/ui";
 import { discordUserUrl, fmtDate, fmtDuration } from "../lib/format";
-import { DName, usePicker } from "../names";
+import { DName, useMemberState, usePicker } from "../names";
 
 const PERIODS: Period[] = ["7d", "30d", "all"];
 
@@ -27,6 +27,25 @@ export default function UserProfile() {
     queryFn: () => api.userProfile(guildId, userId, period),
   });
   const picker = usePicker(guildId);
+  const member = useMemberState(guildId, userId, true);
+  const queryClient = useQueryClient();
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Роли берём из Discord вживую: после снятия роль сразу исчезает из списка, а
+  // «выдать» снова становится доступной. Если API недоступен — откат на БД.
+  const live = member.data?.source === "discord" ? member.data : null;
+  const roleIds = live?.roleIds ?? query.data?.roleIds ?? [];
+
+  const revoke = useMutation({
+    mutationFn: (roleId: string) => api.botRole(guildId, userId, roleId, "revoke"),
+    onSuccess: (_d, roleId) => {
+      setNotice(`роль снята: ${picker.data?.roles.find((r) => r.id === roleId)?.name ?? roleId}`);
+      queryClient.invalidateQueries({ queryKey: ["memberState", guildId, userId] });
+      queryClient.invalidateQueries({ queryKey: ["user", guildId, userId] });
+      queryClient.invalidateQueries({ queryKey: ["audit", guildId] });
+    },
+    onError: (err: Error) => setNotice(err.message),
+  });
 
   if (query.isLoading) return <Loading />;
   if (query.isError) return <ErrorBox error={query.error} />;
@@ -37,6 +56,8 @@ export default function UserProfile() {
     date: d.date.slice(5),
     hours: Math.round((d.ms / 3_600_000) * 100) / 100,
   }));
+  const byPosition = new Map((picker.data?.roles ?? []).map((r) => [r.id, r.position]));
+  const orderedRoles = [...roleIds].sort((a, b) => (byPosition.get(b) ?? -1) - (byPosition.get(a) ?? -1));
 
   return (
     <>
@@ -110,58 +131,119 @@ export default function UserProfile() {
           </table>
         )}
       </Section>
-      <Section title={`Роли (${p.roleIds.length})`}>
-        <div className="chips">
-          {p.roleIds.map((r) => {
-            const meta = picker.data?.roles.find((x) => x.id === r);
-            const color = roleColorCss(meta?.color);
-            return (
-              <span className="chip role-chip" key={r} title={r}>
-                {color && <span className="opt-dot" style={{ background: color }} />}
-                <DName kind="role" id={r} />
-              </span>
-            );
-          })}
-        </div>
+      <Section title={`Роли (${orderedRoles.length})`}>
+        <p className="muted tiny">
+          {live
+            ? "актуальные роли с сервера"
+            : "ролей на сервере не удалось получить — показаны данные из базы, они могут отставать"}
+          {canWrite && orderedRoles.length > 0 ? " · × снимает роль" : ""}
+        </p>
+        {orderedRoles.length === 0 ? (
+          <Empty>Ролей нет.</Empty>
+        ) : (
+          <div className="chips">
+            {orderedRoles.map((r) => {
+              const meta = picker.data?.roles.find((x) => x.id === r);
+              const color = roleColorCss(meta?.color);
+              return (
+                <span className="chip role-chip" key={r} title={r}>
+                  {color && <span className="opt-dot" style={{ background: color }} />}
+                  <DName kind="role" id={r} />
+                  {canWrite && (
+                    <button
+                      className="chip-x"
+                      type="button"
+                      aria-label={`снять роль ${meta?.name ?? r}`}
+                      disabled={revoke.isPending || (meta ? !meta.assignable : false)}
+                      onClick={() => revoke.mutate(r)}
+                    >
+                      ×
+                    </button>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+        )}
       </Section>
-      {canWrite && <ActionPanel guildId={guildId} userId={userId} roleIds={p.roleIds} />}
+      {canWrite && (
+        <ActionPanel
+          guildId={guildId}
+          userId={userId}
+          roleIds={roleIds}
+          notice={notice}
+          setNotice={setNotice}
+          clearNotice={() => setNotice(null)}
+        />
+      )}
     </>
   );
 }
 
-function ActionPanel({ guildId, userId, roleIds }: { guildId: string; userId: string; roleIds: string[] }) {
+const TIMEOUT_PRESETS: { label: string; seconds: number }[] = [
+  { label: "5 мин", seconds: 300 },
+  { label: "1 ч", seconds: 3600 },
+  { label: "6 ч", seconds: 21600 },
+  { label: "24 ч", seconds: 86400 },
+];
+
+type RunKind = "grant" | "revoke" | "mute" | "unmute" | "move" | "disconnect" | "kick";
+
+function ActionPanel({
+  guildId,
+  userId,
+  roleIds,
+  notice,
+  setNotice,
+  clearNotice,
+}: {
+  guildId: string;
+  userId: string;
+  roleIds: string[];
+  notice: string | null;
+  setNotice: (v: string) => void;
+  clearNotice: () => void;
+}) {
   const [roleId, setRoleId] = useState("");
   const [channelId, setChannelId] = useState("");
   const [reason, setReason] = useState("");
-  const [notice, setNotice] = useState<string | null>(null);
+  const [seconds, setSeconds] = useState(3600);
+  const [error, setError] = useState<string | null>(null);
   const picker = usePicker(guildId);
+  const member = useMemberState(guildId, userId, true);
   const queryClient = useQueryClient();
 
   const run = useMutation({
-    mutationFn: async ({ kind }: { kind: string }) => {
+    mutationFn: async ({ kind }: { kind: RunKind }) => {
       switch (kind) {
         case "grant":
           return api.botRole(guildId, userId, roleId, "grant");
         case "revoke":
           return api.botRole(guildId, userId, roleId, "revoke");
         case "mute":
-          return api.botTimeout(guildId, userId, true);
+          return api.botTimeout(guildId, userId, true, seconds);
         case "unmute":
           return api.botTimeout(guildId, userId, false);
         case "move":
           return api.botMove(guildId, userId, channelId);
+        case "disconnect":
+          return api.botDisconnect(guildId, userId);
         case "kick":
           return api.botKick(guildId, userId, reason);
-        default:
-          throw new Error("unknown action");
       }
     },
     onSuccess: (_data, vars) => {
-      setNotice(`выполнено: ${vars.kind}`);
+      setError(null);
+      clearNotice();
+      queryClient.invalidateQueries({ queryKey: ["memberState", guildId, userId] });
       queryClient.invalidateQueries({ queryKey: ["user", guildId, userId] });
       queryClient.invalidateQueries({ queryKey: ["audit", guildId] });
+      setNotice(LABELS[vars.kind]);
     },
-    onError: (err: Error) => setNotice(err.message),
+    onError: (err: Error) => {
+      clearNotice();
+      setError(err.message);
+    },
   });
   const busy = run.isPending;
   const isId = (v: string) => /^\d{5,25}$/.test(v);
@@ -169,55 +251,107 @@ function ActionPanel({ guildId, userId, roleIds }: { guildId: string; userId: st
   const held = new Set(roleIds);
   const roles = picker.data?.roles ?? [];
   const channels = picker.data?.voiceChannels ?? [];
+  const live = member.data?.source === "discord" ? member.data : null;
+  const voiceChannelId = live?.voiceChannelId ?? null;
+  const timeoutUntil = live?.timeoutUntil ?? null;
   const roleOptions: PickerOption[] = roles.map((r) => ({
     id: r.id,
     name: r.name,
     color: r.color,
-    note: !r.assignable ? "неуправляема" : held.has(r.id) ? "есть" : undefined,
+    note: !r.assignable ? "неуправляема" : held.has(r.id) ? "уже есть" : undefined,
     disabled: !r.assignable,
   }));
   const channelOptions: PickerOption[] = channels.map((c) => ({
     id: c.id,
     name: c.name,
-    note: c.type === 13 ? "stage" : undefined,
+    note: c.type === 13 ? "stage" : c.id === voiceChannelId ? "здесь" : undefined,
+    disabled: c.id === voiceChannelId,
   }));
   const selectedRole = roles.find((r) => r.id === roleId);
+  const roleReady = isId(roleId) || !!selectedRole;
+  const canGrant = roleReady && (selectedRole ? selectedRole.assignable && !held.has(roleId) : true);
+  const canRevoke = roleReady && (selectedRole ? selectedRole.assignable && held.has(roleId) : held.has(roleId));
+  const moveDisabled = busy || !isId(channelId) || (live ? !voiceChannelId || channelId === voiceChannelId : false);
 
   return (
     <Section title="Действия от имени бота">
-      {notice && <p className="hint">{notice}</p>}
+      {(notice || error) && (
+        <p className={error ? "hint danger" : "hint"} onClick={clearNotice}>
+          {error ?? notice}
+        </p>
+      )}
+      {live ? (
+        <div className="state-strip">
+          {voiceChannelId ? (
+            <span className="badge voice">
+              в голосовом · <DName kind="channel" id={voiceChannelId} />
+            </span>
+          ) : (
+            <span className="badge idle">не в голосовом канале</span>
+          )}
+          {timeoutUntil ? <span className="badge muted-until">тайм-аут до {fmtDate(timeoutUntil)}</span> : null}
+        </div>
+      ) : (
+        <p className="muted tiny">
+          Discord API сейчас не отдаёт состояние участника — часть кнопок может быть неточной, а роли показаны по базе.
+        </p>
+      )}
+
       <div className="actions-grid">
         <div className="action">
+          <h4>Роли</h4>
           {roleOptions.length > 0 ? (
-            <OptionSelect placeholder="выбери роль" options={roleOptions} value={roleId} onChange={setRoleId} disabled={busy} />
+            <OptionSelect
+              placeholder="выбери роль"
+              options={roleOptions}
+              value={roleId}
+              onChange={setRoleId}
+              disabled={busy}
+            />
           ) : (
             <input value={roleId} onChange={(e) => setRoleId(e.target.value)} placeholder="role id" />
           )}
-          <button
-            disabled={busy || (!isId(roleId) && !selectedRole) || (selectedRole ? !selectedRole.assignable || held.has(roleId) : false)}
-            onClick={() => run.mutate({ kind: "grant" })}
-          >
-            выдать роль
-          </button>
-          <button
-            disabled={busy || (!isId(roleId) && !selectedRole) || (selectedRole ? !selectedRole.assignable || !held.has(roleId) : false)}
-            onClick={() => run.mutate({ kind: "revoke" })}
-          >
-            снять роль
-          </button>
+          <div className="action-row">
+            <button disabled={busy || !canGrant} onClick={() => run.mutate({ kind: "grant" })}>
+              выдать роль
+            </button>
+            <button disabled={busy || !canRevoke} onClick={() => run.mutate({ kind: "revoke" })}>
+              снять роль
+            </button>
+          </div>
+          <p className="muted tiny">
+            Снять можно и крестиком в списке ролей выше — так роль сразу исчезает из карточки.
+          </p>
         </div>
+
         <div className="action">
-          <button disabled={busy} onClick={() => run.mutate({ kind: "mute" })}>
-            mute 10 мин
-          </button>
-          <button disabled={busy} onClick={() => run.mutate({ kind: "unmute" })}>
-            снять mute
-          </button>
+          <h4>Тайм-аут</h4>
+          <div className="chips">
+            {TIMEOUT_PRESETS.map((t) => (
+              <button
+                key={t.seconds}
+                className={t.seconds === seconds ? "chip active" : "chip"}
+                onClick={() => setSeconds(t.seconds)}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+          <div className="action-row">
+            <button disabled={busy} onClick={() => run.mutate({ kind: "mute" })}>
+              в тайм-аут
+            </button>
+            <button disabled={busy || !timeoutUntil} onClick={() => run.mutate({ kind: "unmute" })}>
+              снять тайм-аут
+            </button>
+          </div>
         </div>
+
         <div className="action">
+          <h4>Голосовой канал</h4>
           {channelOptions.length > 0 ? (
             <OptionSelect
-              placeholder="выбери голосовой канал"
+              placeholder="выбери канал"
               options={channelOptions}
               value={channelId}
               onChange={setChannelId}
@@ -226,16 +360,27 @@ function ActionPanel({ guildId, userId, roleIds }: { guildId: string; userId: st
           ) : (
             <input value={channelId} onChange={(e) => setChannelId(e.target.value)} placeholder="voice channel id" />
           )}
-          <button disabled={busy || !isId(channelId)} onClick={() => run.mutate({ kind: "move" })}>
-            переместить
-          </button>
+          <div className="action-row">
+            <button disabled={moveDisabled} onClick={() => run.mutate({ kind: "move" })}>
+              переместить
+            </button>
+            <button disabled={busy || !voiceChannelId} onClick={() => run.mutate({ kind: "disconnect" })}>
+              выкинуть из канала
+            </button>
+          </div>
+          {live && !voiceChannelId && <p className="muted tiny">перемещение доступно, пока участник в голосовом</p>}
         </div>
-        <div className="action">
-          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="причина кика" />
+
+        <div className="action danger">
+          <h4>Кик с сервера</h4>
+          <input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="причина (в аудит-лог Discord)" />
           <button
+            className="danger"
             disabled={busy || reason.trim().length === 0}
             onClick={() => {
-              if (window.confirm(`Кикнуть пользователя ${userId}?`)) run.mutate({ kind: "kick" });
+              if (window.confirm(`Кикнуть пользователя ${userId} с сервера? Это можно будет исправить только инвайтом.`)) {
+                run.mutate({ kind: "kick" });
+              }
             }}
           >
             кикнуть
@@ -245,3 +390,13 @@ function ActionPanel({ guildId, userId, roleIds }: { guildId: string; userId: st
     </Section>
   );
 }
+
+const LABELS: Record<RunKind, string> = {
+  grant: "роль выдана",
+  revoke: "роль снята",
+  mute: "участник отправлен в тайм-аут",
+  unmute: "тайм-аут снят",
+  move: "перемещён в выбранный канал",
+  disconnect: "отключён от голосового канала",
+  kick: "пользователь удалён с сервера",
+};

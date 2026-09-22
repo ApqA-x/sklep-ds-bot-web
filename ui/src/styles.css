@@ -356,20 +356,104 @@ pre.inline {
 
 .actions-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-  gap: 0.6rem;
+  grid-template-columns: repeat(auto-fit, minmax(255px, 1fr));
+  gap: 0.8rem;
 }
 
 .action {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0.55rem;
+  background: var(--crust);
+  border: 1px solid var(--surface0);
+  border-left: 3px solid var(--mauve);
+  border-radius: 10px;
+  padding: 0.85rem 0.95rem;
+}
+
+.action h4 {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--subtext1);
+  letter-spacing: 0.02em;
+}
+
+.action .action-row {
+  display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
-  align-items: center;
+  gap: 0.45rem;
+}
+
+.action.danger {
+  border-left-color: var(--red);
+}
+
+.action.danger h4 {
+  color: var(--red);
 }
 
 .action input {
-  flex: 1;
+  width: 100%;
   min-width: 120px;
+}
+
+button.danger {
+  background: var(--red);
+  border-color: var(--red);
+  color: var(--crust);
+  font-weight: 600;
+}
+
+button.danger:hover:not(:disabled) {
+  background: var(--maroon);
+  border-color: var(--maroon);
+}
+
+.chip-x {
+  border: none;
+  background: none;
+  color: var(--overlay1);
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 0.2rem;
+  margin-left: 0.25rem;
+  border-radius: 4px;
+}
+
+.chip-x:hover:not(:disabled) {
+  color: var(--red);
+  background: var(--surface1);
+}
+
+.state-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+
+.badge.voice {
+  color: var(--blue);
+  border-color: var(--blue);
+}
+
+.badge.idle {
+  color: var(--overlay0);
+}
+
+.badge.muted-until {
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
+
+.hint.danger {
+  color: var(--red);
+}
+
+.muted.tiny,
+.tiny {
+  font-size: 0.76rem;
 }
 
 .badge {

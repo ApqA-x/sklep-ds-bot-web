@@ -87,7 +87,7 @@ def _finish(request: Request, action: str, arguments: dict[str, Any], status: in
         action=f"bot.{action}",
         after={**arguments, "discordStatus": status, "detail": detail if not ok else None},
         ok=ok,
-        origin="discord",
+        origin="web",  # инициатор — веб-интерфейс; Discord здесь только транспорт исполнения
     )
     if not ok:
         raise HTTPException(status_code=502, detail={"discordStatus": status, "body": detail})
@@ -129,6 +129,19 @@ async def member_move(request: Request, guildId: str, userId: str, body: MoveMem
         json_body={"channel_id": body.channelId},
     )
     return _finish(request, "move", {"userId": userId, "channelId": body.channelId}, status, payload)
+
+
+@router.post("/member/{userId}/disconnect")
+async def member_disconnect(request: Request, guildId: str, userId: str) -> dict:
+    _snowflake(guildId, "guildId")
+    _snowflake(userId, "userId")
+    status, payload = await _call(
+        request,
+        "PATCH",
+        f"/guilds/{guildId}/members/{userId}",
+        json_body={"channel_id": None},
+    )
+    return _finish(request, "disconnect", {"userId": userId}, status, payload)
 
 
 @router.post("/member/{userId}/kick")

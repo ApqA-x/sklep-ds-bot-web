@@ -202,6 +202,15 @@ export type PickerPayload = {
   voiceChannels: VoiceChannelOption[];
 };
 
+export type MemberState = {
+  guildId: string;
+  userId: string;
+  source: "discord" | "unavailable";
+  roleIds: string[] | null;
+  timeoutUntil: string | null;
+  voiceChannelId: string | null;
+};
+
 export type ChatChannel = {
   channelId: string;
   count: number;

@@ -117,17 +117,56 @@ def test_discord_error_maps_502_and_audits(monkeypatch: pytest.MonkeyPatch) -> N
     assert audit["action"] == "bot.role"
     assert audit["ok"] is False
     assert audit["after"]["discordStatus"] == 403
-    assert audit["origin"] == "discord"
+    assert audit["origin"] == "web"  # инициатор — сайт, Discord лишь транспорт
 
 
-def test_successful_bot_action_audited_with_discord_origin(calls: list[dict]) -> None:
+def test_successful_bot_action_audited_with_web_origin(calls: list[dict]) -> None:
     client = _client()
     assert client.post(
         f"/api/guild/{GUILD}/bot/member/{USER}/roles", json={"roleId": ROLE, "action": "grant"}
     ).status_code == 200
     audit = client.app.state.db[mutations.COLL_AUDIT].docs[0]
-    assert audit["origin"] == "discord"
+    assert audit["origin"] == "web"
     assert audit["ok"] is True
+
+
+def test_disconnect_member(calls: list[dict]) -> None:
+    client = _client()
+    assert client.post(f"/api/guild/{GUILD}/bot/member/{USER}/disconnect").status_code == 200
+    assert calls[-1] == {
+        "method": "PATCH",
+        "path": f"/guilds/{GUILD}/members/{USER}",
+        "json": {"channel_id": None},
+        "reason": None,
+    }
+    audit = client.app.state.db[mutations.COLL_AUDIT].docs[0]
+    assert audit["action"] == "bot.disconnect"
+    assert audit["origin"] == "web"
+
+
+def test_member_state_live_from_discord(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_get_member(cfg, guild_id, user_id):
+        return {
+            "roles": [ROLE],
+            "communication_disabled_until": "2026-09-22T12:00:00+00:00",
+            "voice": {"channel_id": CHANNEL},
+        }
+
+    monkeypatch.setattr(discord_api, "get_member", fake_get_member)
+    client = _client()
+    body = client.get(f"/api/guild/{GUILD}/users/{USER}/member").json()
+    assert body["source"] == "discord"
+    assert body["roleIds"] == [ROLE]
+    assert body["timeoutUntil"] == "2026-09-22T12:00:00+00:00"
+    assert body["voiceChannelId"] == CHANNEL
+
+
+def test_member_state_unavailable_without_token() -> None:
+    client = _client(discord_token="")
+    body = client.get(f"/api/guild/{GUILD}/users/{USER}/member").json()
+    assert body["source"] == "unavailable"
+    assert body["roleIds"] is None
+    assert client.get(f"/api/guild/{GUILD}/users/bad/member").status_code == 422
 
 
 def test_missing_bot_token_503() -> None:

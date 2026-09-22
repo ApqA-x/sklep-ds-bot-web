@@ -197,8 +197,37 @@ def test_picker_endpoint_without_token_returns_empty_lists() -> None:
     response = client.get(f"/api/guild/{GUILD}/picker")
     assert response.status_code == 200
     body = response.json()
-    assert body == {"guildId": GUILD, "roles": [], "voiceChannels": []}
+    assert body == {"guildId": GUILD, "roles": [], "voiceChannels": [], "textChannels": []}
     assert client.get("/api/guild/abc/picker").status_code == 422
+
+
+def test_picker_splits_voice_and_text_channels(monkeypatch) -> None:
+    from api import discord_api
+
+    rows = [
+        {"id": "10", "name": "Категория", "type": 4, "parentId": None, "position": 0},
+        {"id": "11", "name": "General", "type": 0, "parentId": "10", "position": 1},
+        {"id": "12", "name": "Voice", "type": 2, "parentId": "10", "position": 2},
+        {"id": "13", "name": "Announce", "type": 5, "parentId": None, "position": 3},
+    ]
+
+    async def fake_roles(cfg, guild):
+        return []
+
+    async def fake_channels(cfg, guild):
+        return rows
+
+    async def fake_top(cfg, guild):
+        return None
+
+    monkeypatch.setattr(discord_api, "guild_roles_raw", fake_roles)
+    monkeypatch.setattr(discord_api, "guild_channels_raw", fake_channels)
+    monkeypatch.setattr(discord_api, "bot_top_role_position", fake_top)
+    client = _client(FakeDB())
+    body = client.get(f"/api/guild/{GUILD}/picker").json()
+    assert [c["id"] for c in body["voiceChannels"]] == ["12"]
+    assert [c["id"] for c in body["textChannels"]] == ["11", "13"]
+
 
 
 def test_fetch_bot_guilds_falls_back_when_application_endpoint_fails(monkeypatch) -> None:

@@ -72,6 +72,35 @@ def test_patch_rejects_invalid_values() -> None:
     assert client.patch(f"/api/guild/{GUILD}/settings", json={}).status_code == 422
 
 
+def test_patch_command_access_and_categories() -> None:
+    db = _settings_db()
+    client = _dev_client(db)
+    response = client.patch(
+        f"/api/guild/{GUILD}/settings",
+        json={
+            "commandAccess": {"stalker": "admin", "Jump": "all"},
+            "activityCategoryChannelIds": {"join-leave": USER, "messages": USER},
+        },
+    )
+    assert response.status_code == 200
+    call = _update_calls(db, queries.COLL_GUILD_SETTINGS)[-1]
+    # имена команд нормализуются в нижний регистр, категории пишутся как есть
+    assert call[3]["$set"]["commandAccess"] == {"stalker": "admin", "jump": "all"}
+    assert call[3]["$set"]["activityCategoryChannelIds"] == {"join-leave": USER, "messages": USER}
+
+
+def test_patch_rejects_bad_command_access_and_categories() -> None:
+    client = _dev_client(_settings_db())
+    assert client.patch(f"/api/guild/{GUILD}/settings", json={"commandAccess": {"jump": "owner"}}).status_code == 422
+    assert client.patch(f"/api/guild/{GUILD}/settings", json={"commandAccess": {"Bad Name": "all"}}).status_code == 422
+    assert client.patch(
+        f"/api/guild/{GUILD}/settings", json={"activityCategoryChannelIds": {"nope": USER}}
+    ).status_code == 422
+    assert client.patch(
+        f"/api/guild/{GUILD}/settings", json={"activityCategoryChannelIds": {"profile": "not-a-snowflake"}}
+    ).status_code == 422
+
+
 def test_patch_conflict_on_stale_updated_at() -> None:
     db = _settings_db(updatedAt=datetime(2026, 9, 10, 12, tzinfo=timezone.utc))
     client = _dev_client(db)

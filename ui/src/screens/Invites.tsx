@@ -4,7 +4,6 @@ import { Link, useParams } from "react-router-dom";
 import {
   Bar,
   BarChart,
-  CartesianGrid,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -12,15 +11,19 @@ import {
 } from "recharts";
 import { api } from "../api/client";
 import type { Period } from "../api/types";
+import { ChartControls, Grid, useGridPref } from "../components/charts";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDate } from "../lib/format";
 import { DName } from "../names";
 
 const PERIODS: Period[] = ["7d", "30d", "all"];
+const TOPS = [5, 10, 20];
 
 export default function Invites() {
   const { guildId = "" } = useParams();
   const [period, setPeriod] = useState<Period>("30d");
+  const [top, setTop] = useState(10);
+  const [grid, setGrid] = useGridPref();
   const query = useQuery({
     queryKey: ["invites", guildId, period],
     queryFn: () => api.invites(guildId, period),
@@ -31,7 +34,7 @@ export default function Invites() {
 
   const data = query.data;
   if (!data) return null;
-  const chart = data.byInviter.slice(0, 10);
+  const chart = data.byInviter.slice(0, top);
 
   return (
     <>
@@ -43,14 +46,15 @@ export default function Invites() {
         ))}
       </div>
       {chart.length > 0 && (
-        <Section title="Привели участников (топ-10)">
+        <Section title={`Привели участников (топ-${top})`}>
+          <ChartControls top={top} setTop={setTop} topOptions={TOPS} grid={grid} setGrid={setGrid} />
           <div className="chart">
-            <ResponsiveContainer width="100%" height={220}>
+            <ResponsiveContainer width="100%" height={Math.max(220, top * 22)}>
               <BarChart data={chart}>
-                <CartesianGrid strokeDasharray="3 3" />
+                <Grid show={grid} />
                 <XAxis dataKey="userName" interval={0} angle={-20} height={50} textAnchor="end" />
                 <YAxis allowDecimals={false} />
-                <Tooltip />
+                <Tooltip formatter={(value) => [String(value), "приглашено"]} />
                 <Bar dataKey="count" fill="#a6e3a1" />
               </BarChart>
             </ResponsiveContainer>

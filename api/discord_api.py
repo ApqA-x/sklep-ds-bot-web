@@ -195,18 +195,28 @@ def build_role_options(
 
 
 VOICE_CHANNEL_TYPES = (2, 13)
+# бот пишет сообщения (саммари/activity-карточки) в текстовые и анонсовые каналы
+TEXT_CHANNEL_TYPES = (0, 5)
 
 
-def build_voice_channels(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _channels_of_types(rows: list[dict[str, Any]], types: tuple[int, ...]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in sorted(rows, key=lambda r: (int(r.get("position") or 0), str(r.get("id") or ""))):
-        if int(row.get("type") or 0) not in VOICE_CHANNEL_TYPES:
+        if int(row.get("type") or 0) not in types:
             continue
         cid = str(row.get("id") or "")
         if cid == "":
             continue
         out.append({"id": cid, "name": str(row.get("name") or cid), "type": int(row.get("type"))})
     return out
+
+
+def build_voice_channels(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return _channels_of_types(rows, VOICE_CHANNEL_TYPES)
+
+
+def build_text_channels(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return _channels_of_types(rows, TEXT_CHANNEL_TYPES)
 
 
 async def get_member(cfg: WebConfig, guild_id: str, user_id: str) -> dict[str, Any] | None:

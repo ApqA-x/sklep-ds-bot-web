@@ -200,6 +200,7 @@ export type PickerPayload = {
   guildId: string;
   roles: RoleOption[];
   voiceChannels: VoiceChannelOption[];
+  textChannels: VoiceChannelOption[];
 };
 
 export type MemberState = {

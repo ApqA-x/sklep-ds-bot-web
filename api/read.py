@@ -204,7 +204,8 @@ async def guild_picker(request: Request, guildId: str) -> dict:
         top_position = None
     roles = discord_api.build_role_options(role_rows, guild, top_position)
     channels = discord_api.build_voice_channels(channel_rows)
-    return {"guildId": guild, "roles": roles, "voiceChannels": channels}
+    text_channels = discord_api.build_text_channels(channel_rows)
+    return {"guildId": guild, "roles": roles, "voiceChannels": channels, "textChannels": text_channels}
 
 
 @router.get("/names")

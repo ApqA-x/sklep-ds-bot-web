@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import {
-  CartesianGrid,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -12,6 +11,7 @@ import {
 } from "recharts";
 import { api, useCanWrite } from "../api/client";
 import type { Period } from "../api/types";
+import { Grid } from "../components/charts";
 import { Empty, ErrorBox, Loading, OptionSelect, roleColorCss, Section, type PickerOption } from "../components/ui";
 import { discordUserUrl, fmtDate, fmtDuration } from "../lib/format";
 import { DName, useMemberState, usePicker } from "../names";
@@ -79,7 +79,7 @@ export default function UserProfile() {
           <div className="chart">
             <ResponsiveContainer width="100%" height={220}>
               <LineChart data={daily}>
-                <CartesianGrid strokeDasharray="3 3" />
+                <Grid />
                 <XAxis dataKey="date" />
                 <YAxis />
                 <Tooltip />

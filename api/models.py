@@ -26,6 +26,10 @@ ACTIVITY_EVENT_TYPES = {
     "profile_roles_update",
 }
 TRACKING_MODES = {"all", "none", "specific"}
+# копия ACTIVITY_CATEGORIES из dsbot domain.py — ключи activityCategoryChannelIds
+ACTIVITY_CATEGORIES = {"join-leave", "messages", "voice-log", "profile"}
+COMMAND_ACCESS_VALUES = {"all", "admin"}
+COMMAND_NAME_RE = re.compile(r"^[a-z0-9\-]{1,32}$")
 
 
 def _check_id(value: str, field: str) -> str:
@@ -62,6 +66,7 @@ class GuildSettingsPatch(BaseModel):
     activityChannelId: str | None = None
     activityCategoryChannelIds: dict[str, str] | None = None
     activityEventTypes: list[str] | None = None
+    commandAccess: dict[str, str] | None = None
     expectedUpdatedAt: str | None = None
 
     @field_validator("trackingMode")
@@ -96,7 +101,25 @@ class GuildSettingsPatch(BaseModel):
     def _categories(cls, value: dict[str, str] | None) -> dict[str, str] | None:
         if value is None:
             return None
-        return {_check_id(k, "categoryId"): _check_id(v, "channelId") for k, v in value.items()}
+        unknown = set(value) - ACTIVITY_CATEGORIES
+        if unknown:
+            raise ValueError(f"unknown activity categories: {sorted(unknown)}")
+        return {k: _check_id(v, "channelId") for k, v in value.items()}
+
+    @field_validator("commandAccess")
+    @classmethod
+    def _command_access(cls, value: dict[str, str] | None) -> dict[str, str] | None:
+        if value is None:
+            return None
+        result: dict[str, str] = {}
+        for name, access in value.items():
+            key = name.strip().lower()
+            if not COMMAND_NAME_RE.match(key):
+                raise ValueError(f"invalid command name: {name!r}")
+            if access not in COMMAND_ACCESS_VALUES:
+                raise ValueError(f"commandAccess[{key}] must be one of {sorted(COMMAND_ACCESS_VALUES)}")
+            result[key] = access
+        return result
 
     def mongo_set(self) -> dict[str, object]:
         """Patch fields (without conflict token) keyed as in Mongo documents."""

@@ -845,6 +845,63 @@ button.danger:hover:not(:disabled) {
   border-top: 1px dashed var(--border);
 }
 
+.session-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.online-count {
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  font: inherit;
+  font-weight: 600;
+  color: var(--mauve);
+  background: transparent;
+  border: 1px solid var(--mauve);
+}
+
+.online-count:hover:not(:disabled) {
+  transform: scale(1.06);
+  color: var(--crust);
+  background: color-mix(in srgb, var(--mauve) 78%, black);
+  border-color: color-mix(in srgb, var(--mauve) 78%, black);
+}
+
+.online-count.active {
+  color: var(--crust);
+  background: var(--mauve);
+}
+
+.online-count.active:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--mauve) 78%, black);
+}
+
+.online-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0 0 0.6rem;
+  padding: 0.5rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface0);
+}
+
+.online-user {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.online-user:hover {
+  color: var(--mauve);
+}
+
 .intervals {
   margin-top: 0.55rem;
 }

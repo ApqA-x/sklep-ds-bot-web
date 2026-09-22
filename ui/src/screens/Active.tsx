@@ -21,6 +21,10 @@ function msSince(now: number, iso: string | null | undefined): number {
   return now - new Date(iso).getTime();
 }
 
+function fmtUtc(d: Date): string {
+  return `${d.toISOString().slice(0, 19).replace("T", " ")} UTC`;
+}
+
 // интервалы: активный тикает в реальном времени, закрытые берём из durationMs
 function intervalMs(p: SessionDetailType["participants"][number], now: number): number {
   if (p.active) return Math.max(0, msSince(now, p.joinedAt));
@@ -42,6 +46,7 @@ function SessionExpanded({
     refetchInterval: 15000,
   });
   const names = useNames(guildId);
+  const [showOnline, setShowOnline] = useState(false);
   if (query.isLoading) return <Loading />;
   if (query.isError) return <ErrorBox error={query.error} />;
   const s = query.data;
@@ -57,9 +62,36 @@ function SessionExpanded({
     grouped.set(p.userId, g);
   }
   const rows = [...grouped.entries()].sort((a, b) => b[1].totalMs - a[1].totalMs);
+  const online = rows.filter(([, g]) => g.inChannel);
 
   return (
     <div className="card-details">
+      <div className="session-summary muted tiny">
+        Обновлено: {s.updatedAt ? fmtUtc(new Date(s.updatedAt)) : fmtUtc(new Date(query.dataUpdatedAt))} · Всего:{" "}
+        {s.participants.length} ·{" "}
+        <button
+          type="button"
+          className={showOnline ? "online-count active" : "online-count"}
+          title="показать, кто сейчас в канале"
+          onClick={() => setShowOnline((v) => !v)}
+        >
+          В сети: {online.length}
+        </button>
+      </div>
+      {showOnline && (
+        <div className="online-list">
+          {online.length === 0 ? (
+            <span className="muted tiny">Сейчас никого нет в канале.</span>
+          ) : (
+            online.map(([userId, g]) => (
+              <Link key={userId} to={`/g/${guildId}/users/${userId}`} className="online-user" title={userId}>
+                {g.userName || nameOf(names.data, "user", userId)}
+                <span className="muted tiny">в канале {fmtClock(g.totalMs)}</span>
+              </Link>
+            ))
+          )}
+        </div>
+      )}
       <table>
         <thead>
           <tr>

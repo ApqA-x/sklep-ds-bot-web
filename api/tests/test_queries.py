@@ -167,11 +167,13 @@ def test_sessions_history_pagination_and_total() -> None:
 def test_session_detail_guild_isolation() -> None:
     db = FakeDB()
     db[queries.COLL_SESSIONS] = FakeCollection(queries.COLL_SESSIONS, docs=[
-        {"_id": "s1", "guildId": "2", "channelId": "c", "status": "closed", "startedAt": _dt(1)},
+        {"_id": "s1", "guildId": "2", "channelId": "c", "status": "closed", "startedAt": _dt(1),
+         "updatedAt": _dt(2)},
     ])
     assert queries.session_detail(db, "1", "s1") is None
     found = queries.session_detail(db, "2", "s1")
     assert found is not None and found["id"] == "s1"
+    assert found["updatedAt"] == "2026-09-02T00:00:00Z"
 
 
 def test_user_profile_none_for_unknown_and_full_for_known() -> None:

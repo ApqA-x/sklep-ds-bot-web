@@ -284,6 +284,7 @@ def session_detail(db: Any, guild_id: str, session_id: str) -> dict | None:
         "startedAt": _iso(session.get("startedAt")),
         "endedAt": _iso(session.get("endedAt")),
         "endedByUserId": session.get("endedByUserId"),
+        "updatedAt": _iso(session.get("updatedAt")),
         "summaryMessage": session.get("summaryMessage"),
         "summaryGeneratedAt": _iso(session.get("summaryGeneratedAt")),
         "participants": [

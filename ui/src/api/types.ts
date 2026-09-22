@@ -74,6 +74,7 @@ export type SessionDetail = {
   startedAt: string;
   endedAt: string | null;
   endedByUserId: string | null;
+  updatedAt: string | null;
   summaryMessage: string | null;
   summaryGeneratedAt: string | null;
   participants: ParticipantFull[];

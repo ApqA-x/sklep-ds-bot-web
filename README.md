@@ -80,8 +80,8 @@ workflow `publish.yml` соберёт `ghcr.io/apqa-x/sklep-ds-bot-web:0.1.0` (+
 
 | Этап | Статус |
 |---|---|
-| 0. Каркас | ✅ текущий |
-| 1. Read API | ⬜ |
+| 0. Каркас | ✅ |
+| 1. Read API | ✅ текущий (`api/queries.py`, `api/read.py`, web-индексы `web_*` при старте) |
 | 2. SPA v1 | ⬜ |
 | 3. OAuth + права | ⬜ |
 | 4. Write-слой | ⬜ |

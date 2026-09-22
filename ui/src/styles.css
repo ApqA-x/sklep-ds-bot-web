@@ -1,11 +1,35 @@
+/* Catppuccin Mocha */
 :root {
   color-scheme: dark;
-  --bg: #111214;
-  --panel: #1a1c20;
-  --border: #2a2d33;
-  --text: #e6e8eb;
-  --muted: #8b909a;
-  --accent: #5865f2;
+  --base: #1e1e2e;
+  --mantle: #181825;
+  --crust: #11111b;
+  --surface0: #313244;
+  --surface1: #45475a;
+  --surface2: #585b70;
+  --overlay0: #6c7086;
+  --overlay1: #7f849c;
+  --text: #cdd6f4;
+  --subtext0: #a6adc8;
+  --subtext1: #bac2de;
+  --blue: #89b4fa;
+  --lavender: #b4befe;
+  --sapphire: #74c7ec;
+  --sky: #89dceb;
+  --teal: #94e2d5;
+  --green: #a6e3a1;
+  --yellow: #f9e2af;
+  --peach: #fab387;
+  --maroon: #eba0ac;
+  --red: #f38ba8;
+  --mauve: #cba6f7;
+  --pink: #f5c2e7;
+  --flamingo: #f2cdcd;
+
+  --bg: var(--base);
+  --panel: var(--mantle);
+  --border: var(--surface0);
+  --accent: var(--mauve);
 }
 
 * {
@@ -21,7 +45,7 @@ body {
 }
 
 a {
-  color: var(--accent);
+  color: var(--blue);
   text-decoration: none;
 }
 
@@ -48,6 +72,7 @@ a:hover {
 .brand {
   font-weight: 700;
   letter-spacing: 0.03em;
+  color: var(--mauve);
 }
 
 .nav {
@@ -56,13 +81,13 @@ a:hover {
 }
 
 .nav a {
-  color: var(--muted);
+  color: var(--subtext0);
   padding: 0.2rem 0.1rem;
 }
 
 .nav a.active {
   color: var(--text);
-  border-bottom: 2px solid var(--accent);
+  border-bottom: 2px solid var(--mauve);
 }
 
 .guild-switch {
@@ -79,12 +104,17 @@ a:hover {
 input,
 button,
 select {
-  background: var(--bg);
+  background: var(--crust);
   color: var(--text);
-  border: 1px solid var(--border);
+  border: 1px solid var(--surface1);
   border-radius: 6px;
   padding: 0.35rem 0.6rem;
   font: inherit;
+}
+
+button:hover:not(:disabled) {
+  border-color: var(--surface2);
+  background: var(--surface0);
 }
 
 button {
@@ -114,12 +144,14 @@ button:disabled {
 .chip {
   border-radius: 999px;
   padding: 0.25rem 0.8rem;
+  background: var(--surface0);
+  border-color: var(--surface1);
 }
 
 .chip.active {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: white;
+  background: var(--mauve);
+  border-color: var(--mauve);
+  color: var(--crust);
 }
 
 .chips {
@@ -139,6 +171,7 @@ button:disabled {
 .section h2 {
   margin: 0 0 0.7rem;
   font-size: 1.02rem;
+  color: var(--lavender);
 }
 
 table {
@@ -155,8 +188,12 @@ td {
 }
 
 th {
-  color: var(--muted);
+  color: var(--subtext0);
   font-weight: 600;
+}
+
+tr:hover td {
+  background: var(--surface0);
 }
 
 .cards {
@@ -187,7 +224,7 @@ th {
 }
 
 .kv dt {
-  color: var(--muted);
+  color: var(--subtext0);
 }
 
 .kv dd {
@@ -206,7 +243,7 @@ pre.inline {
 }
 
 .summary {
-  background: var(--bg);
+  background: var(--crust);
   border-radius: 8px;
   padding: 0.7rem 0.9rem;
   border: 1px solid var(--border);
@@ -214,19 +251,19 @@ pre.inline {
 
 .state {
   padding: 1.2rem;
-  color: var(--muted);
+  color: var(--subtext0);
 }
 
 .state.error {
-  color: #f38ba8;
+  color: var(--red);
 }
 
 .muted {
-  color: var(--muted);
+  color: var(--overlay1);
 }
 
 .hint {
-  color: var(--muted);
+  color: var(--subtext0);
   font-size: 0.86rem;
 }
 
@@ -236,13 +273,14 @@ pre.inline {
 
 .home h1 {
   margin-bottom: 0.3rem;
+  color: var(--mauve);
 }
 
 .user-chip {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  color: var(--muted);
+  color: var(--subtext0);
   font-size: 0.9rem;
 }
 
@@ -269,7 +307,7 @@ pre.inline {
 
 .field span {
   min-width: 210px;
-  color: var(--muted);
+  color: var(--subtext0);
 }
 
 .field input,
@@ -332,4 +370,27 @@ pre.inline {
 .action input {
   flex: 1;
   min-width: 120px;
+}
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 0.05rem 0.55rem;
+  font-size: 0.78rem;
+  border: 1px solid var(--surface1);
+}
+
+.badge.web {
+  color: var(--sapphire);
+  border-color: var(--sapphire);
+}
+
+.badge.discord {
+  color: var(--yellow);
+  border-color: var(--yellow);
+}
+
+.badge.bot {
+  color: var(--teal);
+  border-color: var(--teal);
 }

@@ -56,7 +56,7 @@ export default function Leaderboard() {
                 <XAxis dataKey="name" interval={0} angle={-20} height={50} textAnchor="end" />
                 <YAxis />
                 <Tooltip />
-                <Bar dataKey="hours" fill="#5865f2" />
+                <Bar dataKey="hours" fill="#cba6f7" />
               </BarChart>
             </ResponsiveContainer>
           </div>

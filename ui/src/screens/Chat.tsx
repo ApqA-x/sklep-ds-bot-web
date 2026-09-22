@@ -66,7 +66,7 @@ export default function Chat() {
     queryFn: () => api.chatChannels(guildId),
   });
 
-  const [tab, setTab] = useState<"feed" | "filters">("feed");
+  const [showFilters, setShowFilters] = useState(false);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [cursor, setCursor] = useState<string | null | undefined>(undefined); // undefined: ещё не грузили
@@ -78,16 +78,8 @@ export default function Chat() {
 
   const available = channels.data?.items ?? [];
 
-  // фильтры со вкладки «Фильтры» (канал и порядок дат живут в ленте)
-  const panelFiltersCount = [filters.userId, filters.type, filters.dateFrom, filters.dateTo].filter(Boolean).length;
-  const panelSummary = [
-    filters.userId && `автор: ${nameOf(names.data, "user", filters.userId) || filters.userId}`,
-    filters.type && `тип: ${TYPE_LABELS[filters.type]}`,
-    (filters.dateFrom || filters.dateTo) && `период: ${filters.dateFrom || "…"} — ${filters.dateTo || "…"}`,
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const hasFilters = panelFiltersCount > 0 || Boolean(filters.channelId);
+  // панель фильтров: автор, тип, период (канал и порядок дат живут в ленте)
+  const activeCount = [filters.userId, filters.type, filters.dateFrom, filters.dateTo].filter(Boolean).length;
 
   const fetchPage = useCallback(
     async (extra: { before?: string; after?: string }) => {
@@ -139,17 +131,19 @@ export default function Chat() {
         </Empty>
       ) : (
         <>
-          <div className="tabs">
-            <button className={tab === "feed" ? "tab active" : "tab"} onClick={() => setTab("feed")}>
-              Сообщения
-            </button>
-            <button className={tab === "filters" ? "tab active" : "tab"} onClick={() => setTab("filters")}>
+          <div className="toolbar">
+            <button
+              className={showFilters || activeCount > 0 ? "chip active" : "chip"}
+              onClick={() => setShowFilters((v) => !v)}
+            >
               Фильтры
-              {panelFiltersCount > 0 && <span className="count-badge">{panelFiltersCount}</span>}
+              {activeCount > 0 && <span className="count-badge">{activeCount}</span>}
             </button>
+            <span className="muted tiny">
+              {activeCount > 0 ? `активных фильтров: ${activeCount}` : "фильтры не заданы"}
+            </span>
           </div>
-
-          {tab === "filters" ? (
+          {showFilters && (
             <div className="filters-panel">
               <div className="filter-block">
                 <h4>Автор сообщений</h4>
@@ -178,124 +172,110 @@ export default function Chat() {
                 <h4>Период (границы включительно)</h4>
                 <div className="filter-row">
                   <label className="chart-control">
-                    <span>с даты</span>
+                    <span>с</span>
                     <input type="date" value={filters.dateFrom} onChange={(e) => set({ dateFrom: e.target.value })} />
                   </label>
                   <label className="chart-control">
-                    <span>по дату</span>
+                    <span>по</span>
                     <input type="date" value={filters.dateTo} onChange={(e) => set({ dateTo: e.target.value })} />
                   </label>
                 </div>
               </div>
-              <div className="filter-row">
-                {panelFiltersCount > 0 && (
-                  <button
-                    className="linklike"
-                    onClick={() => set({ userId: "", type: "", dateFrom: "", dateTo: "" })}
-                  >
+              {activeCount > 0 && (
+                <div className="filter-actions">
+                  <span className="muted tiny">
+                    {filters.type ? `тип: ${TYPE_LABELS[filters.type]} · ` : ""}
+                    {filters.userId ? `автор: ${nameOf(names.data, "user", filters.userId) || filters.userId} · ` : ""}
+                    {(filters.dateFrom || filters.dateTo) && `период: ${filters.dateFrom || "…"} — ${filters.dateTo || "…"}`}
+                  </span>
+                  <button className="linklike" onClick={() => set({ userId: "", type: "", dateFrom: "", dateTo: "" })}>
                     сбросить фильтры
                   </button>
-                )}
-                <button className="linklike" onClick={() => setTab("feed")}>
-                  к сообщениям →
-                </button>
-              </div>
+                </div>
+              )}
             </div>
-          ) : (
+          )}
+          <div className="toolbar">
+            <button
+              className={filters.channelId === "" ? "chip active" : "chip"}
+              onClick={() => set({ channelId: "" })}
+            >
+              все каналы
+            </button>
+            {available.map((c) => (
+              <button
+                key={c.channelId}
+                className={c.channelId === filters.channelId ? "chip active" : "chip"}
+                onClick={() => set({ channelId: c.channelId })}
+              >
+                {nameOf(names.data, "channel", c.channelId)} ({c.count})
+              </button>
+            ))}
+            <button
+              className="sort-toggle"
+              title="порядок по дате"
+              onClick={() => set({ sort: filters.sort === "desc" ? "asc" : "desc" })}
+            >
+              <span className="sort-arrow">{filters.sort === "desc" ? "↓" : "↑"}</span>
+              {filters.sort === "desc" ? "сначала новые" : "сначала старые"}
+            </button>
+          </div>
+          {error && <ErrorBox error={new Error(error)} />}
+          {cursor !== undefined && cursor !== null && (
+            <div className="toolbar">
+              <button
+                disabled={loading}
+                onClick={() =>
+                  void fetchPage(
+                    filters.sort === "desc" ? { before: cursor ?? undefined } : { after: cursor ?? undefined },
+                  )
+                }
+              >
+                {loading ? "загрузка…" : filters.sort === "desc" ? "показать более ранние" : "показать более новые"}
+              </button>
+            </div>
+          )}
+          {loading && messages.length === 0 ? (
+            <Loading />
+          ) : messages.length === 0 && !error ? (
             <>
-              <div className="toolbar">
-                <button
-                  className={filters.channelId === "" ? "chip active" : "chip"}
-                  onClick={() => set({ channelId: "" })}
-                >
-                  все каналы
-                </button>
-                {available.map((c) => (
-                  <button
-                    key={c.channelId}
-                    className={c.channelId === filters.channelId ? "chip active" : "chip"}
-                    onClick={() => set({ channelId: c.channelId })}
-                  >
-                    {nameOf(names.data, "channel", c.channelId)} ({c.count})
+              <Empty>Нет сообщений под выбранные фильтры.</Empty>
+              {activeCount > 0 && (
+                <p className="muted tiny">
+                  <button className="linklike" onClick={() => setShowFilters(true)}>
+                    ослабить фильтры
                   </button>
-                ))}
-                <button
-                  className="sort-toggle"
-                  title="порядок по дате"
-                  onClick={() => set({ sort: filters.sort === "desc" ? "asc" : "desc" })}
-                >
-                  <span className="sort-arrow">{filters.sort === "desc" ? "↓" : "↑"}</span>
-                  {filters.sort === "desc" ? "сначала новые" : "сначала старые"}
-                </button>
-              </div>
-              {hasFilters && (
-                <div className="toolbar">
-                  <button className="chip active" title="изменить на вкладке «Фильтры»" onClick={() => setTab("filters")}>
-                    🔎 {panelSummary || `канал: ${nameOf(names.data, "channel", filters.channelId)}`}
-                  </button>
-                  <button className="linklike" onClick={() => setFilters(EMPTY_FILTERS)}>
-                    сбросить всё
-                  </button>
-                </div>
-              )}
-              {error && <ErrorBox error={new Error(error)} />}
-              {cursor !== undefined && cursor !== null && (
-                <div className="toolbar">
-                  <button
-                    disabled={loading}
-                    onClick={() =>
-                      void fetchPage(
-                        filters.sort === "desc" ? { before: cursor ?? undefined } : { after: cursor ?? undefined },
-                      )
-                    }
-                  >
-                    {loading ? "загрузка…" : filters.sort === "desc" ? "показать более ранние" : "показать более новые"}
-                  </button>
-                </div>
-              )}
-              {loading && messages.length === 0 ? (
-                <Loading />
-              ) : messages.length === 0 && !error ? (
-                <>
-                  <Empty>Нет сообщений под выбранные фильтры.</Empty>
-                  {panelFiltersCount > 0 && (
-                    <p className="muted tiny">
-                      <button className="linklike" onClick={() => setTab("filters")}>
-                        ослабить фильтры
-                      </button>
-                    </p>
-                  )}
-                </>
-              ) : (
-                <div className="chat-list">
-                  {messages.map((m) => (
-                    <div className="chat-message" key={m.messageId} data-deleted={m.deletedAt ? "true" : undefined}>
-                      <span className="chat-time">{fmtDate(m.sentAt)}</span>
-                      <strong className="chat-author" title={m.authorUserId}>
-                        {nameOf(names.data, "user", m.authorUserId) || m.authorName || m.authorUserId}
-                      </strong>
-                      <span className="chat-main">
-                        {!filters.channelId && m.channelId && (
-                          <span className="muted tiny">#{nameOf(names.data, "channel", m.channelId)} </span>
-                        )}
-                        <span className="chat-content">{m.content}</span>
-                        {m.attachments?.length > 0 && (
-                          <span className="chat-attachments">
-                            {m.attachments.map((a) => (
-                              <Attachment key={a.id || a.filename} a={a} />
-                            ))}
-                          </span>
-                        )}
-                      </span>
-                      <span className="chat-flags">
-                        {m.editedAt && <span className="chat-flag">изменено</span>}
-                        {m.deletedAt && <span className="chat-flag">удалено</span>}
-                      </span>
-                    </div>
-                  ))}
-                </div>
+                </p>
               )}
             </>
+          ) : (
+            <div className="chat-list">
+              {messages.map((m) => (
+                <div className="chat-message" key={m.messageId} data-deleted={m.deletedAt ? "true" : undefined}>
+                  <span className="chat-time">{fmtDate(m.sentAt)}</span>
+                  <strong className="chat-author" title={m.authorUserId}>
+                    {nameOf(names.data, "user", m.authorUserId) || m.authorName || m.authorUserId}
+                  </strong>
+                  <span className="chat-main">
+                    {!filters.channelId && m.channelId && (
+                      <span className="muted tiny">#{nameOf(names.data, "channel", m.channelId)} </span>
+                    )}
+                    <span className="chat-content">{m.content}</span>
+                    {m.attachments?.length > 0 && (
+                      <span className="chat-attachments">
+                        {m.attachments.map((a) => (
+                          <Attachment key={a.id || a.filename} a={a} />
+                        ))}
+                      </span>
+                    )}
+                  </span>
+                  <span className="chat-flags">
+                    {m.editedAt && <span className="chat-flag">изменено</span>}
+                    {m.deletedAt && <span className="chat-flag">удалено</span>}
+                  </span>
+                </div>
+              ))}
+            </div>
           )}
         </>
       )}

@@ -15,7 +15,7 @@ export default function Home() {
   if (!me) return null;
   return (
     <div className="home">
-      <h1>voice_tracker</h1>
+      <h1>Estera</h1>
       {me.authEnabled && !me.authenticated && (
         <p>
           <a className="chip" href="/api/auth/login">

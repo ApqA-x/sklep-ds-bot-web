@@ -125,75 +125,71 @@ export default function Audit() {
       {showFilters && (
         <div className="filters-panel">
           <div className="filter-block">
-            <div className="filter-row">
-              <span className="muted tiny">Источник</span>
-              <div className="chips">
-                {FILTERS.map((f) => (
-                  <button
-                    key={f.key || "all"}
-                    className={f.key === origin ? "chip active" : "chip"}
-                    onClick={() => {
-                      setOrigin(f.key);
-                      resetPage();
-                    }}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-            <div className="filter-row">
-              <span className="muted tiny">Итог</span>
-              <div className="chips">
-                {OK_FILTERS.map((f) => (
-                  <button
-                    key={f.key || "any"}
-                    className={f.key === okFilter ? "chip active" : "chip"}
-                    onClick={() => {
-                      setOkFilter(f.key);
-                      resetPage();
-                    }}
-                  >
-                    {f.label}
-                  </button>
-                ))}
-              </div>
+            <h4>Источник</h4>
+            <div className="chips">
+              {FILTERS.map((f) => (
+                <button
+                  key={f.key || "all"}
+                  className={f.key === origin ? "chip active" : "chip"}
+                  onClick={() => {
+                    setOrigin(f.key);
+                    resetPage();
+                  }}
+                >
+                  {f.label}
+                </button>
+              ))}
             </div>
           </div>
           <div className="filter-block">
-            <div className="filter-row">
-              <span className="muted tiny">Действие</span>
-              <select
-                value={action}
-                onChange={(e) => {
-                  setAction(e.target.value);
-                  resetPage();
-                }}
-              >
-                <option value="">все действия</option>
-                {(facets.data?.items ?? []).map((a) => (
-                  <option key={a.action} value={a.action}>
-                    {a.action} ({a.count})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="filter-row">
-              <span className="muted tiny">Цель</span>
-              <TargetUserPicker
-                guildId={guildId}
-                placeholder="пользователь, над которым…"
-                value={target}
-                onChange={(id) => {
-                  setTarget(id);
-                  resetPage();
-                }}
-              />
+            <h4>Итог</h4>
+            <div className="chips">
+              {OK_FILTERS.map((f) => (
+                <button
+                  key={f.key || "any"}
+                  className={f.key === okFilter ? "chip active" : "chip"}
+                  onClick={() => {
+                    setOkFilter(f.key);
+                    resetPage();
+                  }}
+                >
+                  {f.label}
+                </button>
+              ))}
             </div>
           </div>
           <div className="filter-block">
+            <h4>Действие</h4>
+            <select
+              value={action}
+              onChange={(e) => {
+                setAction(e.target.value);
+                resetPage();
+              }}
+            >
+              <option value="">все действия</option>
+              {(facets.data?.items ?? []).map((a) => (
+                <option key={a.action} value={a.action}>
+                  {a.action} ({a.count})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="filter-block">
+            <h4>Цель</h4>
+            <TargetUserPicker
+              guildId={guildId}
+              placeholder="пользователь, над которым…"
+              value={target}
+              onChange={(id) => {
+                setTarget(id);
+                resetPage();
+              }}
+            />
+          </div>
+          <div className="filter-block">
+            <h4>Период</h4>
             <div className="filter-row">
-              <span className="muted tiny">Период</span>
               <label className="chart-control">
                 <span>с</span>
                 <input
@@ -216,9 +212,13 @@ export default function Audit() {
                   }}
                 />
               </label>
+            </div>
+          </div>
+          <div className="filter-block">
+            <h4>Порядок</h4>
+            <div className="chips">
               <button
                 className="chip"
-                title="порядок по дате"
                 onClick={() => {
                   setSort((s) => (s === "desc" ? "asc" : "desc"));
                   resetPage();
@@ -227,12 +227,15 @@ export default function Audit() {
                 {sort === "desc" ? "сначала новые ↓" : "сначала старые ↑"}
               </button>
             </div>
-            {hasFilters && (
+          </div>
+          {hasFilters && (
+            <div className="filter-actions">
+              <span className="muted tiny">активных фильтров: {activeCount}</span>
               <button className="linklike" onClick={resetAll}>
                 сбросить все фильтры
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       )}
       {data.items.length === 0 ? (

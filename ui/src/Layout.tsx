@@ -17,7 +17,7 @@ export default function Layout() {
   return (
     <div className="layout">
       <header className="topbar">
-        <span className="brand">voice_tracker</span>
+        <span className="brand">Estera</span>
         {guildId && (
           <nav className="nav">
             <NavLink to={`/g/${guildId}/leaderboard`}>Лидерборд</NavLink>

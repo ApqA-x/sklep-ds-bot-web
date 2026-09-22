@@ -1,3 +1,11 @@
+export function fmtClock(ms: number): string {
+  const total = Number.isFinite(ms) ? Math.max(0, Math.floor(ms / 1000)) : 0;
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
 export function fmtDuration(ms: number | null | undefined): string {
   if (!ms || ms < 60_000) {
     const s = Math.floor((ms || 0) / 1000);

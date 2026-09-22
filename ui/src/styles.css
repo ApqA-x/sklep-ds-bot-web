@@ -623,3 +623,27 @@ button.danger:hover:not(:disabled) {
   align-items: center;
   gap: 0.4rem;
 }
+
+/* живой таймер на вкладке «Активные»: тикает раз в секунду */
+.live-timer {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--green);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+  animation: live-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes live-pulse {
+  0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(166, 227, 161, 0.5); }
+  50% { opacity: 0.55; box-shadow: 0 0 0 4px rgba(166, 227, 161, 0); }
+}

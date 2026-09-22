@@ -1,12 +1,23 @@
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { Empty, ErrorBox, Loading } from "../components/ui";
-import { fmtDate, fmtDuration } from "../lib/format";
+import { fmtClock, fmtDate } from "../lib/format";
 import { DName } from "../names";
+
+function useNow(intervalMs: number): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(id);
+  }, [intervalMs]);
+  return now;
+}
 
 export default function Active() {
   const { guildId = "" } = useParams();
+  const now = useNow(1000);
   const query = useQuery({
     queryKey: ["active", guildId],
     queryFn: () => api.activeSessions(guildId),
@@ -25,7 +36,10 @@ export default function Active() {
         <div className="card" key={session.id}>
           <div className="card-head">
             <strong>Канал <DName kind="channel" id={session.channelId} /></strong>
-            <span className="muted">с {fmtDate(session.startedAt)}</span>
+            <span className="live-timer">
+              <span className="live-dot" aria-hidden="true" />
+              {fmtClock(now - new Date(session.startedAt).getTime())}
+            </span>
           </div>
           <table>
             <thead>
@@ -42,7 +56,7 @@ export default function Active() {
                     <Link to={`/g/${guildId}/users/${p.userId}`}>{p.userName}</Link>
                   </td>
                   <td>{fmtDate(p.joinedAt)}</td>
-                  <td>{fmtDuration(p.durationMs)}</td>
+                  <td className="live-timer">{fmtClock(now - new Date(p.joinedAt).getTime())}</td>
                 </tr>
               ))}
             </tbody>

@@ -539,3 +539,27 @@ def test_chat_filters_type_user_date_sort_all_channels() -> None:
         f"/api/guild/{GUILD}/chat", params={"sort": "asc", "limit": 2, "after": asc["nextAfter"]}
     ).json()
     assert [item["messageId"] for item in newer["items"]] == ["c", "d"]
+
+
+def test_chat_messages_multiple_channels() -> None:
+    ch1, ch2 = "140000000000000000", "140000000000000001"
+    client = _client(_chat_filter_db())
+
+    single = client.get(f"/api/guild/{GUILD}/chat", params={"channelId": ch1}).json()
+    assert [item["messageId"] for item in single["items"]] == ["a", "b"]
+    assert single["channelIds"] == [ch1]
+
+    both = client.get(f"/api/guild/{GUILD}/chat", params={"channelId": [ch1, ch2]}).json()
+    assert [item["messageId"] for item in both["items"]] == ["a", "b", "c", "d"]
+    assert both["channelIds"] == [ch1, ch2]
+
+    # дубликаты схлопываются, пустые значения не мешают
+    dedup = client.get(f"/api/guild/{GUILD}/chat", params={"channelId": [ch2, "", ch2]}).json()
+    assert [item["messageId"] for item in dedup["items"]] == ["c", "d"]
+    assert dedup["channelIds"] == [ch2]
+
+    # фильтр по каналу сочетается с остальными
+    mixed = client.get(f"/api/guild/{GUILD}/chat", params={"channelId": [ch1, ch2], "userId": "160000000000000002"}).json()
+    assert {item["messageId"] for item in mixed["items"]} == {"b", "d"}
+
+    assert client.get(f"/api/guild/{GUILD}/chat", params={"channelId": [ch1, "bad"]}).status_code == 422

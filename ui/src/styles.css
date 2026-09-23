@@ -198,6 +198,58 @@ button:disabled {
   color: var(--text);
 }
 
+/* чат: селект каналов живёт в тулбаре рядом с «Фильтры», сортировка — у правого края */
+.chat-channel-select {
+  min-width: 15rem;
+  max-width: 24rem;
+}
+
+.toolbar .sort-toggle {
+  margin-left: auto;
+}
+
+/* панель отправки от бота на экране «Чат» */
+.send-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.9rem 1rem;
+  margin: 0 0 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--crust);
+}
+
+.send-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.send-panel .p-inputtextarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.send-results {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+}
+
+.send-results .ok {
+  color: var(--green);
+}
+
+.send-results .fail {
+  color: var(--red);
+}
+
 .tabs {
   display: flex;
   gap: 0.3rem;
@@ -1244,18 +1296,21 @@ button.danger:hover:not(:disabled) {
 }
 
 /* Dropdown */
-.p-dropdown {
+.p-dropdown,
+.p-multiselect {
   background: var(--crust);
   border: 1px solid var(--surface1);
   border-radius: 6px;
   color: var(--text);
 }
 
-.p-dropdown:not(.p-disabled):hover {
+.p-dropdown:not(.p-disabled):hover,
+.p-multiselect:not(.p-disabled):hover {
   border-color: var(--surface2);
 }
 
-.p-dropdown:not(.p-disabled).p-focus {
+.p-dropdown:not(.p-disabled).p-focus,
+.p-multiselect:not(.p-disabled).p-focus {
   border-color: var(--mauve);
   box-shadow: none;
 }
@@ -1275,9 +1330,47 @@ button.danger:hover:not(:disabled) {
   width: 1.8rem;
 }
 
-/* списки в оверлеях (Dropdown/AutoComplete) */
+/* MultiSelect: label, стрелка, чипы выбранных, панель */
+.p-multiselect .p-multiselect-label {
+  color: var(--text);
+  padding: 0.35rem 0.6rem;
+}
+
+.p-multiselect .p-multiselect-label.p-placeholder {
+  color: var(--subtext0);
+}
+
+.p-multiselect .p-multiselect-trigger {
+  background: transparent;
+  color: var(--subtext0);
+  width: 1.8rem;
+}
+
+.p-multiselect .p-multiselect-chip .p-token {
+  background: var(--surface0);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+}
+
+.p-multiselect .p-multiselect-chip .p-token .p-chip-remove-icon {
+  color: var(--subtext0);
+}
+
+.p-multiselect-header {
+  background: var(--surface0);
+  border-bottom: 1px solid var(--border);
+  color: var(--subtext1);
+}
+
+.p-multiselect-footer {
+  border-top: 1px solid var(--border);
+}
+
+/* списки в оверлеях (Dropdown/AutoComplete/MultiSelect) */
 .p-dropdown-panel,
 .p-autocomplete-panel,
+.p-multiselect-panel,
 .p-datepicker {
   background: var(--mantle);
   border: 1px solid var(--surface1);
@@ -1287,19 +1380,22 @@ button.danger:hover:not(:disabled) {
 }
 
 .p-dropdown-item,
-.p-autocomplete-item {
+.p-autocomplete-item,
+.p-multiselect-item {
   color: var(--text);
   padding: 0.35rem 0.6rem;
   border-radius: 6px;
 }
 
 .p-dropdown-item:not(.p-highlight):not(.p-disabled):hover,
-.p-autocomplete-item:not(.p-highlight):not(.p-disabled):hover {
+.p-autocomplete-item:not(.p-highlight):not(.p-disabled):hover,
+.p-multiselect-item:not(.p-highlight):not(.p-disabled):hover {
   background: var(--surface0);
 }
 
 .p-dropdown-item.p-highlight,
-.p-autocomplete-item.p-highlight {
+.p-autocomplete-item.p-highlight,
+.p-multiselect-item.p-highlight {
   background: var(--mauve);
   color: var(--crust);
 }

@@ -550,7 +550,7 @@ def chat_channels(db: Any, guild_id: str) -> list[dict[str, Any]]:
 def chat_messages(
     db: Any,
     guild_id: str,
-    channel_id: str | None,
+    channel_ids: list[str] | None,
     before: datetime | None,
     limit: int,
     *,
@@ -562,8 +562,12 @@ def chat_messages(
     sort: str = "desc",
 ) -> dict[str, Any]:
     where: dict[str, Any] = {"guildId": guild_id}
-    if channel_id:
-        where["channelId"] = channel_id
+    # один канал читается тем же индексом, что и раньше; несколько — через $in
+    ids = [c for c in (channel_ids or []) if c]
+    if len(ids) == 1:
+        where["channelId"] = ids[0]
+    elif len(ids) > 1:
+        where["channelId"] = {"$in": ids}
     if user_id:
         where["authorUserId"] = user_id
     if before is not None or after is not None or date_from is not None or date_to is not None:
@@ -622,7 +626,7 @@ def chat_messages(
     items.sort(key=lambda item: item["sentAt"])  # ленту всегда показываем хронологически
     return {
         "guildId": guild_id,
-        "channelId": channel_id or "",
+        "channelIds": ids,
         "items": items,
         "hasMore": has_more,
         "sort": sort,

@@ -2,14 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { Button } from "primereact/button";
+import { MultiSelect } from "primereact/multiselect";
 import { SelectButton } from "primereact/selectbutton";
-import { api } from "../api/client";
+import { InputTextarea } from "primereact/inputtextarea";
+import { api, useCanWrite } from "../api/client";
 import type { ChatAttachment, ChatMessage } from "../api/types";
 import { TargetUserPicker } from "../components/userSearch";
 import { DateField } from "../components/dateField";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
 import { fmtBytes, fmtDate } from "../lib/format";
-import { nameOf, useNames } from "../names";
+import { nameOf, useNames, usePicker } from "../names";
 
 const TYPE_FILTERS: { key: string; label: string }[] = [
   { key: "", label: "всё" },
@@ -51,7 +53,7 @@ function Attachment({ a }: { a: ChatAttachment }) {
 }
 
 type Filters = {
-  channelId: string; // "" = все каналы
+  channelIds: string[]; // [] = все каналы
   userId: string;
   type: string;
   dateFrom: string;
@@ -59,11 +61,118 @@ type Filters = {
   sort: "asc" | "desc";
 };
 
-const EMPTY_FILTERS: Filters = { channelId: "", userId: "", type: "", dateFrom: "", dateTo: "", sort: "desc" };
+const EMPTY_FILTERS: Filters = { channelIds: [], userId: "", type: "", dateFrom: "", dateTo: "", sort: "desc" };
+
+// лимит Discord на длину текстового сообщения
+const MESSAGE_MAX_LEN = 2000;
+// бэкендный бакет на гилдию: 5 burst, 2/с — держим паузу между каналами
+const SEND_PAUSE_MS = 550;
+
+type SendResult = { channelId: string; ok: boolean; error?: string };
+
+function BotSendPanel({ guildId }: { guildId: string }) {
+  const picker = usePicker(guildId);
+  const [targets, setTargets] = useState<string[]>([]);
+  const [text, setText] = useState("");
+  const [sending, setSending] = useState(false);
+  const [armed, setArmed] = useState(false); // первое нажатие при N>1 — только взводишь подтверждение
+  const [results, setResults] = useState<SendResult[] | null>(null);
+
+  const liveChannels = picker.data?.textChannels ?? [];
+  const options = liveChannels.map((c) => ({ label: c.name, value: c.id }));
+  const nameOfChannel = (id: string) => liveChannels.find((c) => c.id === id)?.name ?? `#${id}`;
+
+  const trimmed = text.trim();
+  const ready = !sending && trimmed.length > 0 && targets.length > 0;
+  const needsConfirm = targets.length > 1;
+
+  const send = async () => {
+    if (!ready) return;
+    if (needsConfirm && !armed) {
+      setArmed(true);
+      return;
+    }
+    setArmed(false);
+    setSending(true);
+    setResults([]);
+    const out: SendResult[] = [];
+    for (const channelId of targets) {
+      try {
+        await api.botMessage(guildId, channelId, trimmed);
+        out.push({ channelId, ok: true });
+      } catch (err) {
+        out.push({ channelId, ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+      setResults([...out]);
+      await new Promise((r) => setTimeout(r, SEND_PAUSE_MS));
+    }
+    setSending(false);
+    if (out.every((r) => r.ok)) setText("");
+  };
+
+  return (
+    <div className="send-panel">
+      <div className="send-row">
+        <MultiSelect
+          className="send-targets"
+          value={targets}
+          options={options}
+          optionLabel="label"
+          optionValue="value"
+          onChange={(e) => {
+            setTargets((e.value as string[]) ?? []);
+            setArmed(false);
+          }}
+          placeholder="каналы для отправки"
+          selectedItemsLabel="выбрано: {0}"
+          maxSelectedLabels={2}
+          display="chip"
+          filter
+          disabled={sending}
+        />
+        <span className="muted tiny">живые текстовые каналы сервера (из Discord, не из истории)</span>
+      </div>
+      <InputTextarea
+        rows={3}
+        value={text}
+        maxLength={MESSAGE_MAX_LEN}
+        placeholder="текст сообщения — придёт от имени бота"
+        disabled={sending}
+        onChange={(e) => {
+          setText(String(e.target.value ?? ""));
+          setArmed(false);
+        }}
+      />
+      <div className="send-row">
+        <Button disabled={!ready} loading={sending} onClick={() => void send()}>
+          {sending ? "отправка…" : armed ? `подтвердить отправку (${targets.length} каналов)` : "отправить"}
+        </Button>
+        <span className="muted tiny">
+          {text.length}/{MESSAGE_MAX_LEN}
+        </span>
+        {needsConfirm && !armed && !sending && <span className="muted tiny">отправка попросит подтверждение</span>}
+      </div>
+      {results && results.length > 0 && (
+        <ul className="send-results">
+          {results.map((r) => (
+            <li key={r.channelId} className={r.ok ? "ok" : "fail"}>
+              {r.ok ? "✓" : "✗"} #{nameOfChannel(r.channelId)}
+              {r.error ? ` — ${r.error}` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+      {results && results.length > 0 && results.every((r) => r.ok) && (
+        <p className="muted tiny">отправлено; в ленте сообщения появятся через несколько секунд</p>
+      )}
+    </div>
+  );
+}
 
 export default function Chat() {
   const { guildId = "" } = useParams();
   const names = useNames(guildId);
+  const canWrite = useCanWrite(guildId);
   const channels = useQuery({
     queryKey: ["chat-channels", guildId],
     queryFn: () => api.chatChannels(guildId),
@@ -91,7 +200,7 @@ export default function Chat() {
       setError(null);
       try {
         const page = await api.chatMessages(guildId, {
-          channelId: filters.channelId || undefined,
+          channelId: filters.channelIds,
           userId: filters.userId || undefined,
           type: filters.type || undefined,
           dateFrom: filters.dateFrom || undefined,
@@ -128,8 +237,14 @@ export default function Chat() {
   // бэкенд отдаёт страницу хронологически; при «сначала новые» разворачиваем ленту
   const feed = filters.sort === "desc" ? [...messages].reverse() : messages;
 
+  const channelOptions = available.map((c) => ({
+    value: c.channelId,
+    label: `${nameOf(names.data, "channel", c.channelId)} (${c.count})`,
+  }));
+
   return (
     <Section title="История чата">
+      {canWrite && <BotSendPanel guildId={guildId} />}
       {available.length === 0 ? (
         <Empty>
           История сообщений ещё не записывается в базу (коллекция chat_messages пуста). Как только бот начнёт её
@@ -145,9 +260,27 @@ export default function Chat() {
               Фильтры
               {activeCount > 0 && <span className="count-badge">{activeCount}</span>}
             </Button>
-            <span className="muted tiny">
-              {activeCount > 0 ? `активных фильтров: ${activeCount}` : "фильтры не заданы"}
-            </span>
+            <MultiSelect
+              className="chat-channel-select"
+              value={filters.channelIds}
+              options={channelOptions}
+              optionLabel="label"
+              optionValue="value"
+              onChange={(e) => set({ channelIds: (e.value as string[]) ?? [] })}
+              placeholder="все каналы"
+              selectedItemsLabel="каналов: {0}"
+              maxSelectedLabels={2}
+              display="chip"
+              filter
+            />
+            <Button
+              className="sort-toggle"
+              title="порядок по дате"
+              onClick={() => set({ sort: filters.sort === "desc" ? "asc" : "desc" })}
+            >
+              <span className="sort-arrow">{filters.sort === "desc" ? "↓" : "↑"}</span>
+              {filters.sort === "desc" ? "сначала новые" : "сначала старые"}
+            </Button>
           </div>
           {showFilters && (
             <div className="filters-panel">
@@ -208,31 +341,6 @@ export default function Chat() {
               )}
             </div>
           )}
-          <div className="toolbar">
-            <Button
-              className={filters.channelId === "" ? "chip active" : "chip"}
-              onClick={() => set({ channelId: "" })}
-            >
-              все каналы
-            </Button>
-            {available.map((c) => (
-              <Button
-                key={c.channelId}
-                className={c.channelId === filters.channelId ? "chip active" : "chip"}
-                onClick={() => set({ channelId: c.channelId })}
-              >
-                {nameOf(names.data, "channel", c.channelId)} ({c.count})
-              </Button>
-            ))}
-            <Button
-              className="sort-toggle"
-              title="порядок по дате"
-              onClick={() => set({ sort: filters.sort === "desc" ? "asc" : "desc" })}
-            >
-              <span className="sort-arrow">{filters.sort === "desc" ? "↓" : "↑"}</span>
-              {filters.sort === "desc" ? "сначала новые" : "сначала старые"}
-            </Button>
-          </div>
           {error && <ErrorBox error={new Error(error)} />}
           {cursor !== undefined && cursor !== null && (
             <div className="toolbar">
@@ -270,7 +378,7 @@ export default function Chat() {
                     {nameOf(names.data, "user", m.authorUserId) || m.authorName || m.authorUserId}
                   </strong>
                   <span className="chat-main">
-                    {!filters.channelId && m.channelId && (
+                    {filters.channelIds.length !== 1 && m.channelId && (
                       <span className="muted tiny">#{nameOf(names.data, "channel", m.channelId)} </span>
                     )}
                     <span className="chat-content">{m.content}</span>

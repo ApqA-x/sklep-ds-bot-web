@@ -140,7 +140,7 @@ export const api = {
   chatMessages: (
     guildId: string,
     opts: {
-      channelId?: string;
+      channelId?: string[];
       before?: string;
       after?: string;
       limit?: number;
@@ -152,7 +152,7 @@ export const api = {
     } = {},
   ) => {
     const p = new URLSearchParams();
-    if (opts.channelId) p.set("channelId", opts.channelId);
+    for (const id of opts.channelId ?? []) p.append("channelId", id);
     if (opts.before) p.set("before", opts.before);
     if (opts.after) p.set("after", opts.after);
     p.set("limit", String(opts.limit ?? 50));

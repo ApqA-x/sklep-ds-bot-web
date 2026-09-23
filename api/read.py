@@ -185,7 +185,7 @@ def chat_channels(request: Request, guildId: str) -> dict:
 def chat_messages(
     request: Request,
     guildId: str,
-    channelId: str = Query(""),
+    channelId: list[str] = Query(default=[]),
     before: str = Query(""),
     after: str = Query(""),
     limit: int = Query(50, ge=1, le=200),
@@ -196,8 +196,10 @@ def chat_messages(
     sort: str = Query("desc", pattern="^(asc|desc)$"),
 ) -> dict:
     guild = _snowflake(guildId, "guildId")
-    if channelId:
-        _snowflake(channelId, "channelId")
+    # UI отдаёт мультивыбор: канал приходит повторением channelId, пустой выбор = все каналы
+    ids = list(dict.fromkeys(_snowflake(c, "channelId") for c in channelId if c))
+    if len(ids) > 100:
+        raise HTTPException(status_code=422, detail="too many channels")
     if userId:
         _snowflake(userId, "userId")
 
@@ -219,7 +221,7 @@ def chat_messages(
     return queries.chat_messages(
         _db(request),
         guild,
-        channelId or None,
+        ids or None,
         _iso_dt(before, "before"),
         limit,
         after=_iso_dt(after, "after"),

@@ -176,8 +176,10 @@ class FakeCollection:
         if upsert:
             new_doc = {k: v for k, v in flt.items() if not isinstance(v, dict)}
             self._apply_update(new_doc, update, inserted=True)
+            # как в Mongo: вставленному документу присваивается _id, и он попадает в upserted_id
+            new_doc.setdefault("_id", f"{self.name}-fake-{len(self.docs)}")
             self.docs.append(new_doc)
-            return FakeUpdateResult(0, 0, upserted_id=new_doc.get("_id"))
+            return FakeUpdateResult(0, 0, upserted_id=new_doc["_id"])
         return FakeUpdateResult(0, 0)
 
     def insert_one(self, doc: dict, **kw):

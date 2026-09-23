@@ -358,6 +358,8 @@ def test_ensure_web_indexes_names_and_errors() -> None:
     assert result["created"] == [
         "voice_session_participants.web_guildId_joinedAt",
         "web_audit_logs.web_audit_guildId_at",
+        "discord_audit_logs.web_disc_audit_guildId_at",
+        "discord_audit_logs.web_disc_audit_guildId_entryId",
         "chat_messages.chat_guildId_channelId_sentAt",
     ]
     assert result["errors"] == ["voice_sessions.web_guildId_status_endedAt: RuntimeError"]

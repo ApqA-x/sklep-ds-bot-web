@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from api import auth as auth_module
+from api import audit_sync
 from api import bot as bot_module
 from api import discord_api, mutations
 from api.config import WebConfig
@@ -183,64 +184,136 @@ def test_member_state_unavailable_without_token() -> None:
     assert client.get(f"/api/guild/{GUILD}/users/bad/member").status_code == 422
 
 
+def test_user_card_collects_avatar_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_get_member(cfg, guild_id, user_id):
+        return {
+            "nick": "Ниндзя",
+            "joined_at": "2026-01-01T00:00:00+00:00",
+            "avatar": "guildhash",
+            "roles": [ROLE],
+            "user": {
+                "username": "ninja",
+                "global_name": "Ninja",
+                "avatar": "globalhash",
+                "banner": "bhash",
+                "accent_color": 8421504,
+            },
+        }
+
+    monkeypatch.setattr(discord_api, "get_member", fake_get_member)
+    client = _client()
+    body = client.get(f"/api/guild/{GUILD}/users/{USER}/card").json()
+    assert body["source"] == "discord"
+    assert body["nick"] == "Ниндзя" and body["username"] == "ninja" and body["globalName"] == "Ninja"
+    assert "/guilds/" in body["avatarUrl"] and body["avatarUrl"].endswith("guildhash.png?size=256")
+    assert body["bannerUrl"].endswith("bhash.png?size=600")
+    assert body["accentColor"] == 8421504
+    assert {a["hash"]: a["kind"] for a in body["avatars"]} == {"guildhash": "guild", "globalhash": "global"}
+
+    # повторный визит не плодит дубли в истории
+    again = client.get(f"/api/guild/{GUILD}/users/{USER}/card").json()
+    assert len(again["avatars"]) == 2
+
+
+def test_user_card_unavailable_defaults() -> None:
+    client = _client(discord_token="")
+    body = client.get(f"/api/guild/{GUILD}/users/{USER}/card").json()
+    assert body["source"] == "unavailable"
+    assert body["nick"] is None and body["avatars"] == []
+    assert "embed/avatars" in body["avatarUrl"]  # силуэт по снефлейку
+    assert client.get(f"/api/guild/{GUILD}/users/bad/card").status_code == 422
+
+
 def test_snowflake_to_iso() -> None:
     # id=1 -> эпоха Discord 2015-01-01T00:00:00Z
     assert discord_api.snowflake_to_iso("1") == "2015-01-01T00:00:00Z"
     assert discord_api.snowflake_to_iso("bad") == ""
 
 
-def test_audit_discord_maps_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+SAMPLE_LOG = {
+    # id разнесены на 1 мс (шаг 4194304), чтобы сортировка по at была однозначной
+    "audit_log_entries": [
+        {
+            "id": "1300000000000000000",
+            "user_id": USER,
+            "action_type": 20,
+            "target_user_id": "160000000000000002",
+            "target_id": "160000000000000002",
+            "options": {"channel_id": CHANNEL, "count": "5"},
+            "reason": "spam",
+        },
+        {"id": "1300000000041943040", "action_type": 999},
+        {
+            # у реальных записей действий с участником нет target_user_id — цель в target_id
+            "id": "1300000000083886080",
+            "user_id": USER,
+            "action_type": 25,
+            "target_id": "160000000000000002",
+            "changes": [
+                {"key": "$+", "new_value": [{"id": ROLE, "name": "Mod"}]},
+                {"key": "$-", "new_value": [{"id": "150000000000000001", "name": "Mute"}]},
+            ],
+        },
+        {"action_type": 22},  # без id — пропускаем
+    ],
+    "users": [{"id": USER, "username": "admin"}, {"id": "160000000000000002", "username": "victim"}],
+}
+
+
+def test_audit_discord_sync_then_read(monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[tuple[str, str]] = []
-    entry_id = "1300000000000000000"
 
     async def fake_request(cfg, method, path, *, json_body=None, reason=None, files=None):
         calls.append((method, path))
-        return 200, {
-            "audit_log_entries": [
-                {
-                    "id": entry_id,
-                    "user_id": USER,
-                    "action_type": 20,
-                    "target_user_id": "160000000000000002",
-                    "target_id": "160000000000000002",
-                    "options": {"channel_id": CHANNEL, "count": "5"},
-                    "reason": "spam",
-                },
-                {"id": "1300000000000000001", "action_type": 999},
-                {
-                    # у реальных записей действий с участником нет target_user_id — цель в target_id
-                    "id": "1300000000000000002",
-                    "user_id": USER,
-                    "action_type": 25,
-                    "target_id": "160000000000000002",
-                },
-                {"action_type": 22},  # без id — пропускаем
-            ],
-            "users": [{"id": USER, "username": "admin"}, {"id": "160000000000000002", "username": "victim"}],
-        }
+        if "after=" in path:
+            return 200, {"audit_log_entries": [], "users": []}
+        return 200, SAMPLE_LOG
 
     monkeypatch.setattr(discord_api, "bot_request", fake_request)
     client = _client()
-    response = client.get(f"/api/guild/{GUILD}/audit/discord?limit=50")
-    assert response.status_code == 200
-    body = response.json()
-    assert body["source"] == "discord"
-    assert calls[-1] == ("GET", f"/guilds/{GUILD}/audit-logs?limit=50")
-    assert len(body["items"]) == 3
-    first = body["items"][0]
-    assert first["action"] == "Кик участника"
-    assert first["actionType"] == 20
-    assert first["at"] == discord_api.snowflake_to_iso(entry_id)
-    assert first["actorName"] == "admin"
-    assert first["targetUserName"] == "victim"
-    assert first["channelId"] == CHANNEL
-    assert first["count"] == "5"
-    assert first["reason"] == "spam"
-    assert body["items"][1]["action"] == "Действие 999"  # неизвестный тип — читаемый фолбэк
-    role_entry = body["items"][2]
+
+    body = client.post(f"/api/guild/{GUILD}/audit/discord/sync").json()
+    assert body == {"guildId": GUILD, "ok": True, "discordStatus": 200, "inserted": 3}
+    assert ("GET", f"/guilds/{GUILD}/audit-logs?limit=100") in calls
+    docs = client.app.state.db["discord_audit_logs"].docs
+    assert all(d["guildId"] == GUILD for d in docs)
+
+    # повторный sync идемпотентен: всё уже в базе, новых нет
+    body = client.post(f"/api/guild/{GUILD}/audit/discord/sync").json()
+    assert body["ok"] is True and body["inserted"] == 0
+
+    page = client.get(f"/api/guild/{GUILD}/audit/discord").json()
+    assert page["source"] == "discord" and page["total"] == 3
+    assert [i["actionType"] for i in page["items"]] == [25, 999, 20]  # sort=desc по at
+    kick = page["items"][2]
+    assert kick["id"] == "1300000000000000000"
+    assert kick["action"] == "Кик участника"
+    assert kick["actorName"] == "admin"
+    assert kick["targetUserName"] == "victim"
+    assert kick["channelId"] == CHANNEL and kick["count"] == "5" and kick["reason"] == "spam"
+    assert kick["at"].startswith("2024")  # snowflake -> дата сохранена и отдана iso
+    role_entry = page["items"][0]
     assert role_entry["action"] == "Изменение ролей участника"
     assert role_entry["targetUserId"] == "160000000000000002"  # подставлен из target_id
     assert role_entry["targetUserName"] == "victim"
+    assert [c["key"] for c in role_entry["changes"]] == ["$+", "$-"]
+
+    # фильтры
+    one = client.get(f"/api/guild/{GUILD}/audit/discord?actionType=999").json()
+    assert one["total"] == 1 and one["items"][0]["action"] == "Действие 999"
+    by_target = client.get(f"/api/guild/{GUILD}/audit/discord?target=160000000000000002").json()
+    assert by_target["total"] == 2
+    by_actor = client.get(f"/api/guild/{GUILD}/audit/discord?actor={USER}").json()
+    assert by_actor["total"] == 2
+    small = client.get(f"/api/guild/{GUILD}/audit/discord?page=2&size=2").json()
+    assert small["total"] == 3 and len(small["items"]) == 1
+    assert client.get(f"/api/guild/{GUILD}/audit/discord?actor=bad").status_code == 422
+
+    # фейсет действий
+    coll = client.app.state.db["discord_audit_logs"]
+    coll.aggregate_results = [[{"_id": {"type": 20, "action": "Кик участника"}, "n": 2}]]
+    facets = client.get(f"/api/guild/{GUILD}/audit/discord/actions").json()
+    assert facets["items"] == [{"actionType": 20, "action": "Кик участника", "count": 2}]
 
 
 def test_audit_discord_403_hint_and_no_token(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -248,10 +321,13 @@ def test_audit_discord_403_hint_and_no_token(monkeypatch: pytest.MonkeyPatch) ->
         return 403, {"message": "Missing Permissions"}
 
     monkeypatch.setattr(discord_api, "bot_request", forbidden)
-    response = _client().get(f"/api/guild/{GUILD}/audit/discord")
-    assert response.status_code == 502
-    assert "журнал аудита" in response.json()["detail"].lower()
-    assert _client(discord_token="").get(f"/api/guild/{GUILD}/audit/discord").status_code == 503
+    body = _client().post(f"/api/guild/{GUILD}/audit/discord/sync").json()
+    assert body["ok"] is False and body["discordStatus"] == 403
+    assert "журнал аудита" in body["error"]
+    # пустая локальная копия при этом читается без ошибки
+    page = _client().get(f"/api/guild/{GUILD}/audit/discord").json()
+    assert page["items"] == [] and page["total"] == 0
+    assert _client(discord_token="").post(f"/api/guild/{GUILD}/audit/discord/sync").status_code == 503
 
 
 def test_missing_bot_token_503() -> None:
@@ -355,3 +431,17 @@ def test_write_router_admin_gate_blocks_reads_too() -> None:
         f"/api/guild/{GUILD}/bot/member/{USER}/roles", json={"roleId": ROLE, "action": "grant"}
     )
     assert response.status_code == 401
+
+
+def test_known_guilds_reads_id_key() -> None:
+    # боевые документы guild_settings ключены _id=guildId (пишет бот и PATCH дашборда),
+    # guildId-поле — только у старых/ручных записей
+    db = FakeDB()
+    db["guild_settings"].docs.extend(
+        [
+            {"_id": GUILD, "updatedAt": None},
+            {"_id": "170000000000000001", "guildId": "170000000000000001"},
+            {"_id": "", "guildId": ""},
+        ]
+    )
+    assert audit_sync.known_guilds(db) == [GUILD, "170000000000000001"]

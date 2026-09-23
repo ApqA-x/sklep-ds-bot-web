@@ -15,6 +15,7 @@ COLL_NICKNAME_HISTORY = "member_nickname_history"
 COLL_NICKNAME_STATE = "member_nickname_state"
 COLL_INVITE_CATALOG = "invite_catalog"
 COLL_CHAT = "chat_messages"
+COLL_AVATAR_HISTORY = "user_avatar_history"
 
 PERIODS: dict[str, timedelta | None] = {
     "7d": timedelta(days=7),
@@ -178,6 +179,40 @@ def build_user_daily_pipeline(guild_id: str, user_id: str, cutoff: datetime | No
             "$group": {
                 "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$joinedAt"}},
                 "ms": {"$sum": "$durationMs"},
+            }
+        },
+        {"$sort": {"_id": 1}},
+    ]
+
+
+def build_chat_daily_pipeline(guild_id: str, user_id: str, cutoff: datetime | None) -> list[dict]:
+    """Сообщения пользователя по дням — ряд для графика профиля."""
+    match: dict[str, Any] = {"guildId": guild_id, "authorUserId": user_id}
+    if cutoff is not None:
+        match["sentAt"] = {"$gte": cutoff}
+    return [
+        {"$match": match},
+        {
+            "$group": {
+                "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$sentAt"}},
+                "n": {"$sum": 1},
+            }
+        },
+        {"$sort": {"_id": 1}},
+    ]
+
+
+def build_invites_daily_pipeline(guild_id: str, inviter_user_id: str, cutoff: datetime | None) -> list[dict]:
+    """Приведённые по инвайту вступления по дням — ряд для графика профиля."""
+    match: dict[str, Any] = {"guildId": guild_id, "inviterUserId": inviter_user_id}
+    if cutoff is not None:
+        match["joinedAt"] = {"$gte": cutoff}
+    return [
+        {"$match": match},
+        {
+            "$group": {
+                "_id": {"$dateToString": {"format": "%Y-%m-%d", "date": "$joinedAt"}},
+                "n": {"$sum": 1},
             }
         },
         {"$sort": {"_id": 1}},
@@ -405,6 +440,14 @@ def user_profile(db: Any, guild_id: str, user_id: str, period: str) -> dict | No
     invited_count = int(
         db[COLL_JOIN_ATTRIBUTIONS].count_documents({"guildId": guild_id, "inviterUserId": user_id})
     )
+    daily_messages = [
+        {"date": row["_id"], "count": int(row.get("n") or 0)}
+        for row in db[COLL_CHAT].aggregate(build_chat_daily_pipeline(guild_id, user_id, cutoff))
+    ]
+    daily_invites = [
+        {"date": row["_id"], "count": int(row.get("n") or 0)}
+        for row in db[COLL_JOIN_ATTRIBUTIONS].aggregate(build_invites_daily_pipeline(guild_id, user_id, cutoff))
+    ]
     return {
         "guildId": guild_id,
         "userId": user_id,
@@ -415,6 +458,8 @@ def user_profile(db: Any, guild_id: str, user_id: str, period: str) -> dict | No
         "messageCount": message_count,
         "invitedCount": invited_count,
         "daily": daily,
+        "dailyMessages": daily_messages,
+        "dailyInvites": daily_invites,
         "roleIds": [str(r) for r in (role_state or {}).get("roleIds") or []],
         "nicknames": nicknames,
         "join": None
@@ -639,6 +684,8 @@ WEB_INDEXES: list[tuple[str, list[tuple[str, int]], str]] = [
     (COLL_PARTICIPANTS, [("guildId", 1), ("joinedAt", 1)], "web_guildId_joinedAt"),
     (COLL_SESSIONS, [("guildId", 1), ("status", 1), ("endedAt", -1)], "web_guildId_status_endedAt"),
     ("web_audit_logs", [("guildId", 1), ("at", -1)], "web_audit_guildId_at"),
+    ("discord_audit_logs", [("guildId", 1), ("at", -1)], "web_disc_audit_guildId_at"),
+    ("discord_audit_logs", [("guildId", 1), ("entryId", 1)], "web_disc_audit_guildId_entryId"),
     # имя совпадает с индексом writer'а бота (dsbot ensure_indexes) — иначе Mongo считает это
     # «тот же ключ под другим именем» (code 85) и пересоздание конфликует
     (COLL_CHAT, [("guildId", 1), ("channelId", 1), ("sentAt", -1)], "chat_guildId_channelId_sentAt"),

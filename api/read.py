@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from . import queries
+from . import discord_api, queries
 from .auth import require_guild_read
 
 router = APIRouter(
@@ -175,28 +175,163 @@ async def member_state(request: Request, guildId: str, userId: str) -> dict:
     }
 
 
-@router.get("/audit/discord")
-async def audit_discord(request: Request, guildId: str, limit: int = Query(80, ge=1, le=100)) -> dict:
-    """Журнал аудита самого Discord (кик/бан/роли/удаление сообщений и т.п.) через бот-токен."""
-    guild = _snowflake(guildId, "guildId")
-    from . import discord_api
+@router.get("/users/{userId}/card")
+async def user_card(request: Request, guildId: str, userId: str) -> dict:
+    """Карточка для шапки профиля: ник/юзернейм, аватар, банер и история аватарок.
 
+    Прошлые аватарки Discord через бот-API не отдаёт — копит свою историю:
+    каждый хеш, увиденный здесь, попадает в user_avatar_history.
+    """
+    guild = _snowflake(guildId, "guildId")
+    user = _snowflake(userId, "userId")
+    cfg = request.app.state.config
+    db = _db(request)
+    now = datetime.now(timezone.utc)
+    result: dict[str, Any] = {"guildId": guild, "userId": user, "source": "unavailable",
+                              "username": None, "globalName": None, "nick": None,
+                              "joinedAt": None, "avatarUrl": discord_api.default_avatar_url(user),
+                              "bannerUrl": None, "accentColor": None}
+    if cfg.discord_token:
+        try:
+            member = await discord_api.get_member(cfg, guild, user)
+        except discord_api.DiscordError:
+            member = None
+        if member is not None:
+            account = member.get("user") or {}
+            guild_hash = member.get("avatar")
+            global_hash = account.get("avatar")
+            for kind, h in (("guild", guild_hash), ("global", global_hash)):
+                if h:
+                    db[queries.COLL_AVATAR_HISTORY].update_one(
+                        {"guildId": guild, "userId": user, "hash": h},
+                        {"$setOnInsert": {"firstSeen": now}, "$set": {"lastSeen": now, "kind": kind}},
+                        upsert=True,
+                    )
+            result = {
+                **result,
+                "source": "discord",
+                "username": account.get("username"),
+                "globalName": account.get("global_name"),
+                "nick": member.get("nick"),
+                "joinedAt": member.get("joined_at"),
+                "avatarUrl": discord_api.avatar_url(
+                    guild, user, guild_hash or global_hash, "guild" if guild_hash else "global"
+                ),
+                "bannerUrl": discord_api.banner_url(user, account.get("banner")),
+                "accentColor": account.get("accent_color"),
+            }
+    result["avatars"] = [
+        {
+            "hash": str(doc.get("hash") or ""),
+            "kind": str(doc.get("kind") or "global"),
+            "url": discord_api.avatar_url(guild, user, str(doc.get("hash") or ""), str(doc.get("kind") or "global")),
+            "firstSeen": queries._iso(doc.get("firstSeen")),
+            "lastSeen": queries._iso(doc.get("lastSeen")),
+        }
+        for doc in db[queries.COLL_AVATAR_HISTORY].find({"guildId": guild, "userId": user}, sort=[("firstSeen", -1)])
+    ]
+    return result
+
+
+@router.get("/audit/discord")
+def audit_discord(
+    request: Request,
+    guildId: str,
+    page: int = Query(1, ge=1),
+    size: int = Query(50, ge=1, le=100),
+    actionType: int = Query(0, ge=0, description="0 = все типы"),
+    actor: str = Query(""),
+    target: str = Query(""),
+    dateFrom: str = Query(""),
+    dateTo: str = Query(""),
+    sort: str = Query("desc", pattern="^(asc|desc)$"),
+) -> dict:
+    """Журнал аудита Discord из локальной копии (discord_audit_logs) с фильтрами."""
+    from . import audit_sync
+
+    guild = _snowflake(guildId, "guildId")
+    db = _db(request)
+    where: dict[str, Any] = {"guildId": guild}
+    if actionType:
+        where["actionType"] = actionType
+    if actor:
+        where["actorUserId"] = _snowflake(actor, "actor")
+    if target:
+        who = _snowflake(target, "target")
+        where["$or"] = [{"targetUserId": who}, {"targetId": who}]
+    bounds: dict[str, Any] = {}
+    for raw, op in ((dateFrom, "$gte"), (dateTo, "$lte")):
+        if raw:
+            try:
+                bounds[op] = queries.parse_date_bound(raw, end=op == "$lte")
+            except queries.InvalidDate:
+                raise HTTPException(status_code=422, detail="invalid date") from None
+    if bounds:
+        where["at"] = bounds
+    direction = 1 if sort == "asc" else -1
+    total = int(db[audit_sync.COLL_DISCORD_AUDIT].count_documents(where))
+    docs = db[audit_sync.COLL_DISCORD_AUDIT].find(
+        where, sort=[("at", direction)], skip=(page - 1) * size, limit=size
+    )
+    items = [
+        {
+            "id": doc.get("entryId"),
+            "at": queries._iso(doc.get("at")),
+            "actionType": doc.get("actionType"),
+            "action": doc.get("action"),
+            "actorUserId": doc.get("actorUserId"),
+            "actorName": doc.get("actorName"),
+            "targetUserId": doc.get("targetUserId"),
+            "targetUserName": doc.get("targetUserName"),
+            "targetId": doc.get("targetId"),
+            "channelId": doc.get("channelId"),
+            "count": doc.get("count"),
+            "deleteMessageDays": doc.get("deleteMessageDays"),
+            "reason": doc.get("reason"),
+            "changes": doc.get("changes") or [],
+            "options": doc.get("options") or {},
+        }
+        for doc in docs
+    ]
+    return {"guildId": guild, "source": "discord", "page": page, "size": size, "total": total, "items": items}
+
+
+@router.get("/audit/discord/actions")
+def audit_discord_actions(request: Request, guildId: str) -> dict:
+    """Типы действий с количеством — наполняет фильтр журнала Discord."""
+    from . import audit_sync
+
+    guild = _snowflake(guildId, "guildId")
+    rows = _db(request)[audit_sync.COLL_DISCORD_AUDIT].aggregate(
+        [
+            {"$match": {"guildId": guild}},
+            {"$group": {"_id": {"type": "$actionType", "action": "$action"}, "n": {"$sum": 1}}},
+            {"$sort": {"n": -1}},
+        ]
+    )
+    return {
+        "guildId": guild,
+        "items": [
+            {"actionType": int(row["_id"]["type"]), "action": str(row["_id"]["action"]), "count": int(row.get("n") or 0)}
+            for row in rows
+            if isinstance(row.get("_id"), dict) and row["_id"].get("type")
+        ],
+    }
+
+
+@router.post("/audit/discord/sync")
+async def audit_discord_sync(request: Request, guildId: str) -> dict:
+    """Обновить локальную копию журнала Discord прямо сейчас."""
+    from . import audit_sync
+
+    guild = _snowflake(guildId, "guildId")
     cfg = request.app.state.config
     if not cfg.discord_token:
         raise HTTPException(status_code=503, detail="bot token not configured")
-    status, payload = await discord_api.bot_request(cfg, "GET", f"/guilds/{guild}/audit-logs?limit={limit}")
-    if status == 403:
-        raise HTTPException(
-            status_code=502,
-            detail="Discord отказал (403): у роли бота нет разрешения «Просматривать журнал аудита»",
-        )
-    if not 200 <= status < 300:
-        raise HTTPException(status_code=502, detail=f"Discord API вернул статус {status}")
-    body = payload if isinstance(payload, dict) else {}
-    items = discord_api.build_audit_log_entries(
-        list(body.get("audit_log_entries") or []), list(body.get("users") or [])
-    )
-    return {"guildId": guild, "source": "discord", "items": items}
+    result = await audit_sync.sync_guild(_db(request), cfg, guild)
+    if not result["ok"] and result["discordStatus"] == 403:
+        result["error"] = "у роли бота нет разрешения «Просматривать журнал аудита»"
+    return {"guildId": guild, **result}
 
 
 @router.get("/chat/channels")

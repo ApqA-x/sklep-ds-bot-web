@@ -63,6 +63,8 @@ class GuildSettingsPatch(BaseModel):
     autoUnmuteUserIds: list[str] | None = None
     trustedUserIds: list[str] | None = None
     soundboardEnforcementEnabled: bool | None = None
+    autoRestoreRoles: bool | None = None
+    autoRestoreNicknames: bool | None = None
     activityChannelId: str | None = None
     activityCategoryChannelIds: dict[str, str] | None = None
     activityEventTypes: list[str] | None = None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -68,7 +69,16 @@ def create_app(
                 log.info("web indexes: %s", ensure_web_indexes(database))
             except Exception:
                 log.warning("web index creation failed", exc_info=True)
-        yield
+        sync_task: asyncio.Task | None = None
+        if database is not None and cfg.discord_token:
+            from . import audit_sync
+
+            sync_task = asyncio.create_task(audit_sync.run_loop(app))
+        try:
+            yield
+        finally:
+            if sync_task is not None:
+                sync_task.cancel()
 
     app = FastAPI(
         title="sklep-ds-bot-web",

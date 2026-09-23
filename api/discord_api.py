@@ -344,9 +344,39 @@ def build_audit_log_entries(rows: list[dict[str, Any]], users: list[dict[str, An
                 "count": options.get("count"),
                 "deleteMessageDays": options.get("delete_message_days"),
                 "reason": str(row.get("reason") or ""),
+                "changes": [
+                    {"key": str(c.get("key") or ""), "new": c.get("new_value"), "old": c.get("old_value")}
+                    for c in (row.get("changes") or [])
+                    if isinstance(c, dict)
+                ],
+                "options": {str(k): str(v) for k, v in options.items()},
             }
         )
     return out
+
+
+CDN = "https://cdn.discordapp.com"
+
+
+def default_avatar_url(user_id: str) -> str:
+    idx = (int(user_id) >> 22) % 6 if user_id.isdigit() else 0
+    return f"{CDN}/embed/avatars/{idx}.png"
+
+
+def avatar_url(guild_id: str, user_id: str, avatar: str | None, kind: str = "global") -> str:
+    """URL аватарки: kind=guild — серверный вариант, иначе глобальная."""
+    if not avatar:
+        return default_avatar_url(user_id)
+    ext = "gif" if avatar.startswith("a_") else "png"
+    if kind == "guild" and guild_id:
+        return f"{CDN}/guilds/{guild_id}/users/{user_id}/avatars/{avatar}.{ext}?size=256"
+    return f"{CDN}/avatars/{user_id}/{avatar}.{ext}?size=256"
+
+
+def banner_url(user_id: str, banner: str | None) -> str | None:
+    if not banner:
+        return None
+    return f"{CDN}/banners/{user_id}/{banner}.png?size=600"
 
 
 async def get_member(cfg: WebConfig, guild_id: str, user_id: str) -> dict[str, Any] | None:

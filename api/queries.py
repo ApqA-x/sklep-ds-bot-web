@@ -60,6 +60,7 @@ class TTLCache:
 
 _leaderboard_cache = TTLCache()
 _invites_cache = TTLCache()
+_chat_leaderboard_cache = TTLCache()
 
 
 def _iso(value: Any) -> Any:
@@ -112,6 +113,42 @@ def build_leaderboard_pipeline(guild_id: str, cutoff: datetime | None, limit: in
             }
         },
         {"$sort": {"totalMs": -1}},
+        {
+            "$facet": {
+                "page": [{"$skip": skip}, {"$limit": limit}],
+                "total": [{"$count": "n"}],
+            }
+        },
+    ]
+
+
+def build_chat_leaderboard_pipeline(guild_id: str, cutoff: datetime | None, limit: int, skip: int = 0) -> list[dict]:
+    """Топ по числу сообщений. authorName берётся $last после сортировки по sentAt,
+    то есть самое свежее имя автора — как в голосовом лидерборде."""
+    match: dict[str, Any] = {"guildId": guild_id}
+    if cutoff is not None:
+        match["sentAt"] = {"$gte": cutoff}
+    return [
+        {"$match": match},
+        {"$sort": {"sentAt": 1}},
+        {
+            "$group": {
+                "_id": "$authorUserId",
+                "userName": {"$last": "$authorName"},
+                "messages": {"$sum": 1},
+                "channels": {"$addToSet": "$channelId"},
+                "lastMessageAt": {"$max": "$sentAt"},
+            }
+        },
+        {
+            "$project": {
+                "userName": 1,
+                "messages": 1,
+                "lastMessageAt": 1,
+                "channels": {"$size": "$channels"},
+            }
+        },
+        {"$sort": {"messages": -1}},
         {
             "$facet": {
                 "page": [{"$skip": skip}, {"$limit": limit}],
@@ -212,6 +249,32 @@ def leaderboard(db: Any, guild_id: str, period: str, limit: int, page: int = 1) 
     total_rows = facet.get("total") or []
     total = int(total_rows[0]["n"]) if total_rows else 0
     _leaderboard_cache.set(key, (items, total))
+    return items, total, False
+
+
+def chat_leaderboard(db: Any, guild_id: str, period: str, limit: int, page: int = 1) -> tuple[list[dict], int, bool]:
+    """Страница лидерборда по сообщениям: (items, total_authors, cached)."""
+    key = (guild_id, period, limit, page)
+    cached = _chat_leaderboard_cache.get(key)
+    if cached is not None:
+        return cached[0], cached[1], True
+    rows = db[COLL_CHAT].aggregate(
+        build_chat_leaderboard_pipeline(guild_id, period_cutoff(period), limit, (page - 1) * limit)
+    )
+    facet = next(iter(rows), None) or {}
+    items = [
+        {
+            "userId": str(row["_id"]),
+            "userName": row.get("userName") or "unknown",
+            "messages": int(row.get("messages") or 0),
+            "channels": int(row.get("channels") or 0),
+            "lastMessageAt": _iso(row.get("lastMessageAt")),
+        }
+        for row in facet.get("page", [])
+    ]
+    total_rows = facet.get("total") or []
+    total = int(total_rows[0]["n"]) if total_rows else 0
+    _chat_leaderboard_cache.set(key, (items, total))
     return items, total, False
 
 

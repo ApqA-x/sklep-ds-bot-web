@@ -18,6 +18,7 @@ def _dt(day: int, hour: int = 0) -> datetime:
 def _clear_caches() -> None:
     queries._leaderboard_cache.clear()
     queries._invites_cache.clear()
+    queries._chat_leaderboard_cache.clear()
 
 
 # --- pipeline builders ---
@@ -40,6 +41,29 @@ def test_leaderboard_pipeline_period_and_all() -> None:
     all_time = queries.build_leaderboard_pipeline("123", None, 10)
     assert all_time[0]["$match"] == {"guildId": "123"}
     assert all_time[4]["$facet"]["page"] == [{"$skip": 0}, {"$limit": 10}]
+
+
+def test_chat_leaderboard_pipeline_period_and_all() -> None:
+    cutoff = _dt(1)
+    pipeline = queries.build_chat_leaderboard_pipeline("123", cutoff, 50, skip=100)
+    assert pipeline[0] == {"$match": {"guildId": "123", "sentAt": {"$gte": cutoff}}}
+    assert pipeline[1] == {"$sort": {"sentAt": 1}}
+    group = pipeline[2]["$group"]
+    assert group["_id"] == "$authorUserId"
+    assert group["userName"] == {"$last": "$authorName"}
+    assert group["messages"] == {"$sum": 1}
+    assert group["channels"] == {"$addToSet": "$channelId"}
+    assert group["lastMessageAt"] == {"$max": "$sentAt"}
+    # каналы отдаются числом, а не списком идентификаторов
+    assert pipeline[3]["$project"]["channels"] == {"$size": "$channels"}
+    assert pipeline[4] == {"$sort": {"messages": -1}}
+    facet = pipeline[5]["$facet"]
+    assert facet["page"] == [{"$skip": 100}, {"$limit": 50}]
+    assert facet["total"] == [{"$count": "n"}]
+
+    all_time = queries.build_chat_leaderboard_pipeline("123", None, 10)
+    assert all_time[0]["$match"] == {"guildId": "123"}
+    assert all_time[5]["$facet"]["page"] == [{"$skip": 0}, {"$limit": 10}]
 
 
 def test_invites_by_inviter_pipeline_requires_inviter() -> None:
@@ -86,6 +110,69 @@ def test_iso_treats_naive_datetime_as_utc() -> None:
 
 
 # --- executors ---
+
+
+def test_chat_leaderboard_executor_converts_and_caches() -> None:
+    db = FakeDB()
+    db[queries.COLL_CHAT] = FakeCollection(
+        queries.COLL_CHAT,
+        aggregate_results=[
+            [
+                {
+                    "page": [
+                        {
+                            "_id": "777",
+                            "userName": "Vasya",
+                            "messages": 30,
+                            "channels": 3,
+                            "lastMessageAt": _dt(2, 1),
+                        },
+                        {
+                            "_id": "888",
+                            "userName": None,
+                            "messages": 2,
+                            "channels": 1,
+                            "lastMessageAt": None,
+                        },
+                    ],
+                    "total": [{"n": 19}],
+                }
+            ]
+        ],
+    )
+    items, total, cached = queries.chat_leaderboard(db, "123", "all", 50)
+    assert cached is False
+    assert total == 19
+    assert items == [
+        {
+            "userId": "777",
+            "userName": "Vasya",
+            "messages": 30,
+            "channels": 3,
+            "lastMessageAt": "2026-09-02T01:00:00Z",
+        },
+        {
+            "userId": "888",
+            "userName": "unknown",
+            "messages": 2,
+            "channels": 1,
+            "lastMessageAt": None,
+        },
+    ]
+    items2, total2, cached2 = queries.chat_leaderboard(db, "123", "all", 50)
+    assert cached2 is True
+    assert items2 == items and total2 == total
+    assert len(db[queries.COLL_CHAT].calls) == 1
+
+
+def test_chat_leaderboard_executor_empty_page() -> None:
+    db = FakeDB()
+    db[queries.COLL_CHAT] = FakeCollection(
+        queries.COLL_CHAT, aggregate_results=[[{"page": [], "total": []}]]
+    )
+    items, total, cached = queries.chat_leaderboard(db, "123", "7d", 50, page=3)
+    assert items == []
+    assert total == 0
 
 
 def test_leaderboard_executor_converts_and_caches() -> None:

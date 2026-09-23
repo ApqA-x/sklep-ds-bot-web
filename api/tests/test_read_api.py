@@ -31,6 +31,7 @@ def _clear_caches() -> None:
     queries._leaderboard_cache.clear()
     queries._invites_cache.clear()
     queries._names_cache.clear()
+    queries._chat_leaderboard_cache.clear()
     from api import discord_api
 
     discord_api._BOT_GUILD_CACHE.clear()
@@ -62,6 +63,58 @@ def test_leaderboard_validation() -> None:
     assert client.get(f"/api/guild/{GUILD}/leaderboard", params={"period": "5d"}).status_code == 422
     assert client.get(f"/api/guild/{GUILD}/leaderboard", params={"limit": 0}).status_code == 422
     assert client.get(f"/api/guild/{GUILD}/leaderboard", params={"limit": 101}).status_code == 422
+
+
+def test_chat_leaderboard_endpoint() -> None:
+    db = FakeDB()
+    db[queries.COLL_CHAT] = FakeCollection(
+        queries.COLL_CHAT,
+        aggregate_results=[
+            [
+                {
+                    "page": [
+                        {
+                            "_id": "5",
+                            "userName": "U",
+                            "messages": 42,
+                            "channels": 3,
+                            "lastMessageAt": _dt(9).replace(hour=1),
+                        }
+                    ],
+                    "total": [{"n": 17}],
+                }
+            ]
+        ],
+    )
+    client = _client(db)
+    response = client.get(f"/api/guild/{GUILD}/chat-leaderboard", params={"period": "7d", "limit": 10, "page": 2})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["guildId"] == GUILD
+    assert body["page"] == 2
+    assert body["total"] == 17
+    assert body["items"] == [
+        {
+            "userId": "5",
+            "userName": "U",
+            "messages": 42,
+            "channels": 3,
+            "lastMessageAt": "2026-09-09T01:00:00Z",
+        }
+    ]
+    # считаем по авторам, а не по голосовым участникам
+    assert db[queries.COLL_CHAT].calls[0][1] == queries.COLL_CHAT
+    pipeline = db[queries.COLL_CHAT].calls[0][2]
+    assert pipeline[0]["$match"]["guildId"] == GUILD
+    assert pipeline[-1]["$facet"]["page"] == [{"$skip": 10}, {"$limit": 10}]
+
+
+def test_chat_leaderboard_validation() -> None:
+    client = _client(FakeDB())
+    assert client.get("/api/guild/abc/chat-leaderboard").status_code == 422
+    assert client.get(f"/api/guild/{GUILD}/chat-leaderboard", params={"period": "week"}).status_code == 422
+    assert client.get(f"/api/guild/{GUILD}/chat-leaderboard", params={"limit": 0}).status_code == 422
+    assert client.get(f"/api/guild/{GUILD}/chat-leaderboard", params={"page": 0}).status_code == 422
 
 
 def test_sessions_active_endpoint() -> None:

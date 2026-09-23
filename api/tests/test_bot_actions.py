@@ -20,8 +20,22 @@ CHANNEL = "140000000000000000"
 def calls(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     recorded: list[dict] = []
 
-    async def fake_request(cfg, method, path, *, json_body=None, reason=None):
+    async def fake_request(cfg, method, path, *, json_body=None, reason=None, files=None):
         recorded.append({"method": method, "path": path, "json": json_body, "reason": reason})
+        return 200, {"id": "ok"}
+
+    monkeypatch.setattr(discord_api, "bot_request", fake_request)
+    bot_module._reset_rate_buckets()
+    auth_module._clear_recheck_cache()
+    return recorded
+
+
+@pytest.fixture()
+def files_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    recorded: list[dict] = []
+
+    async def fake_request(cfg, method, path, *, json_body=None, reason=None, files=None):
+        recorded.append({"method": method, "path": path, "json": json_body, "files": files})
         return 200, {"id": "ok"}
 
     monkeypatch.setattr(discord_api, "bot_request", fake_request)
@@ -101,7 +115,7 @@ def test_path_injection_rejected(calls: list[dict]) -> None:
 
 
 def test_discord_error_maps_502_and_audits(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fail_request(cfg, method, path, *, json_body=None, reason=None):
+    async def fail_request(cfg, method, path, *, json_body=None, reason=None, files=None):
         return 403, {"message": "Missing Permissions"}
 
     monkeypatch.setattr(discord_api, "bot_request", fail_request)
@@ -188,6 +202,70 @@ def test_rate_limit_burst(calls: list[dict]) -> None:
     assert statuses.count(200) == 5
     assert statuses[-1] == 429
     assert len(calls) == 5
+
+
+def test_message_multipart_with_files(files_calls: list[dict]) -> None:
+    client = _client()
+    response = client.post(
+        f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message",
+        data={"content": "hello"},
+        files=[("files", ("a.txt", b"data", "text/plain"))],
+    )
+    assert response.status_code == 200
+    last = files_calls[-1]
+    assert last["path"] == f"/channels/{CHANNEL}/messages"
+    assert last["json"] == {"content": "hello"}
+    assert last["files"] == [("a.txt", b"data", "text/plain")]
+    audit = client.app.state.db[mutations.COLL_AUDIT].docs[0]
+    assert audit["action"] == "bot.message"
+    assert audit["after"]["attachments"] == [{"name": "a.txt", "size": 4}]
+    assert audit["after"]["length"] == 5
+
+
+def test_message_files_only(files_calls: list[dict]) -> None:
+    client = _client()
+    response = client.post(
+        f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message",
+        data={},
+        files=[("files", ("pic.png", b"\x89PNG", "image/png"))],
+    )
+    assert response.status_code == 200
+    last = files_calls[-1]
+    assert last["json"] is None  # без текста payload_json не шлём
+    assert last["files"] == [("pic.png", b"\x89PNG", "image/png")]
+
+
+def test_message_multipart_validation(files_calls: list[dict], monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _client()
+    url = f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message"
+    # пусто: ни текста, ни файлов
+    assert client.post(url, data={}).status_code == 422
+    # текст слишком длинный
+    assert client.post(url, data={"content": "x" * 2001}).status_code == 422
+    # слишком много файлов
+    monkeypatch.setattr(bot_module, "MAX_FILES", 2)
+    many = [("files", (f"{i}.bin", b"x", "application/octet-stream")) for i in range(3)]
+    assert client.post(url, data={}, files=many).status_code == 422
+    # файл слишком большой
+    monkeypatch.setattr(bot_module, "MAX_FILE_BYTES", 3)
+    assert client.post(url, data={}, files=[("files", ("big.bin", b"xxxx", "application/octet-stream"))]).status_code == 422
+    assert not files_calls  # до Discord ни одна проверка не дошла
+
+
+def test_message_json_still_works(files_calls: list[dict]) -> None:
+    client = _client()
+    response = client.post(
+        f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message", json={"content": "plain json"}
+    )
+    assert response.status_code == 200
+    assert files_calls[-1] == {
+        "method": "POST",
+        "path": f"/channels/{CHANNEL}/messages",
+        "json": {"content": "plain json"},
+        "files": None,
+    }
+    # пустой content по-прежнему 422
+    assert client.post(f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message", json={"content": "  "}).status_code == 422
 
 
 def test_write_router_admin_gate_blocks_reads_too() -> None:

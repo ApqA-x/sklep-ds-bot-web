@@ -65,6 +65,21 @@ async function apiSend<T>(method: "POST" | "PATCH" | "DELETE", path: string, bod
   return (await response.json()) as T;
 }
 
+async function apiSendForm<T>(method: "POST", path: string, form: FormData): Promise<T> {
+  const response = await fetch(path, { method, credentials: "same-origin", body: form });
+  if (!response.ok) {
+    let detail = response.statusText;
+    try {
+      const payload = (await response.json()) as { detail?: string };
+      if (payload.detail) detail = typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
+    } catch {
+      /* not JSON */
+    }
+    throw new ApiError(response.status, detail);
+  }
+  return (await response.json()) as T;
+}
+
 export const api = {
   health: () => apiGet<Health>("/api/healthz"),
 
@@ -207,8 +222,14 @@ export const api = {
   botKick: (guildId: string, userId: string, reason: string) =>
     apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/member/${userId}/kick`, { reason }),
 
-  botMessage: (guildId: string, channelId: string, content: string) =>
-    apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/channel/${channelId}/message`, { content }),
+  botMessage: (guildId: string, channelId: string, content: string, files: File[] = []) => {
+    if (files.length === 0)
+      return apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/channel/${channelId}/message`, { content });
+    const form = new FormData();
+    if (content) form.append("content", content);
+    for (const f of files) form.append("files", f, f.name);
+    return apiSendForm<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/channel/${channelId}/message`, form);
+  },
 
   botInviteCreate: (guildId: string, channelId: string) =>
     apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/invite`, { channelId }),

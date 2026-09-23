@@ -4,3 +4,4 @@ pymongo>=4.6,<5
 starlette>=0.40
 itsdangerous>=2.2
 aiohttp>=3.9
+python-multipart>=0.0.9,<1

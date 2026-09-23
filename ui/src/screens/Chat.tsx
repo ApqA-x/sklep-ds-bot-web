@@ -65,26 +65,62 @@ const EMPTY_FILTERS: Filters = { channelIds: [], userId: "", type: "", dateFrom:
 
 // лимит Discord на длину текстового сообщения
 const MESSAGE_MAX_LEN = 2000;
+// лимиты вложений — как на бэкенде (api/bot.py)
+const ATTACH_MAX_FILES = 10;
+const ATTACH_MAX_FILE_BYTES = 25 * 1024 * 1024;
+const ATTACH_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 // бэкендный бакет на гилдию: 5 burst, 2/с — держим паузу между каналами
 const SEND_PAUSE_MS = 550;
 
 type SendResult = { channelId: string; ok: boolean; error?: string };
 
+function validateAttachments(next: File[]): string | null {
+  if (next.length > ATTACH_MAX_FILES) return `не больше ${ATTACH_MAX_FILES} файлов`;
+  let total = 0;
+  for (const f of next) {
+    if (f.size > ATTACH_MAX_FILE_BYTES) return `файл «${f.name}» больше ${fmtBytes(ATTACH_MAX_FILE_BYTES)}`;
+    total += f.size;
+  }
+  if (total > ATTACH_MAX_TOTAL_BYTES) return `суммарно больше ${fmtBytes(ATTACH_MAX_TOTAL_BYTES)}`;
+  return null;
+}
+
 function BotSendPanel({ guildId }: { guildId: string }) {
   const picker = usePicker(guildId);
   const [targets, setTargets] = useState<string[]>([]);
   const [text, setText] = useState("");
+  const [files, setFiles] = useState<File[]>([]);
+  const [attachError, setAttachError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [armed, setArmed] = useState(false); // первое нажатие при N>1 — только взводишь подтверждение
   const [results, setResults] = useState<SendResult[] | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
 
   const liveChannels = picker.data?.textChannels ?? [];
   const options = liveChannels.map((c) => ({ label: c.name, value: c.id }));
   const nameOfChannel = (id: string) => liveChannels.find((c) => c.id === id)?.name ?? `#${id}`;
 
   const trimmed = text.trim();
-  const ready = !sending && trimmed.length > 0 && targets.length > 0;
+  const ready = !sending && (trimmed.length > 0 || files.length > 0) && targets.length > 0;
   const needsConfirm = targets.length > 1;
+
+  const addFiles = (incoming: FileList | null) => {
+    if (!incoming || incoming.length === 0) return;
+    const next = [...files, ...Array.from(incoming)];
+    const problem = validateAttachments(next);
+    if (problem) {
+      setAttachError(problem);
+      return;
+    }
+    setAttachError(null);
+    setFiles(next);
+    setArmed(false);
+  };
+
+  const removeFile = (index: number) => {
+    setFiles((prev) => prev.filter((_, i) => i !== index));
+    setAttachError(null);
+  };
 
   const send = async () => {
     if (!ready) return;
@@ -98,7 +134,7 @@ function BotSendPanel({ guildId }: { guildId: string }) {
     const out: SendResult[] = [];
     for (const channelId of targets) {
       try {
-        await api.botMessage(guildId, channelId, trimmed);
+        await api.botMessage(guildId, channelId, trimmed, files);
         out.push({ channelId, ok: true });
       } catch (err) {
         out.push({ channelId, ok: false, error: err instanceof Error ? err.message : String(err) });
@@ -107,7 +143,10 @@ function BotSendPanel({ guildId }: { guildId: string }) {
       await new Promise((r) => setTimeout(r, SEND_PAUSE_MS));
     }
     setSending(false);
-    if (out.every((r) => r.ok)) setText("");
+    if (out.every((r) => r.ok)) {
+      setText("");
+      setFiles([]);
+    }
   };
 
   return (
@@ -136,13 +175,41 @@ function BotSendPanel({ guildId }: { guildId: string }) {
         rows={3}
         value={text}
         maxLength={MESSAGE_MAX_LEN}
-        placeholder="текст сообщения — придёт от имени бота"
+        placeholder="текст сообщения — придёт от имени бота (можно без текста, только файлы)"
         disabled={sending}
         onChange={(e) => {
           setText(String(e.target.value ?? ""));
           setArmed(false);
         }}
       />
+      <div className="send-row">
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            addFiles(e.target.files);
+            e.target.value = "";
+          }}
+        />
+        <Button className="chip" disabled={sending} onClick={() => fileInput.current?.click()}>
+          📎 вложения
+        </Button>
+        {files.length > 0 && (
+          <span className="chips">
+            {files.map((f, i) => (
+              <span className="chip" key={`${f.name}-${i}`}>
+                {f.name} <span className="muted tiny">({fmtBytes(f.size)})</span>
+                <Button className="chip-x" title="убрать" disabled={sending} onClick={() => removeFile(i)}>
+                  ×
+                </Button>
+              </span>
+            ))}
+          </span>
+        )}
+      </div>
+      {attachError && <p className="hint danger">{attachError}</p>}
       <div className="send-row">
         <Button disabled={!ready} loading={sending} onClick={() => void send()}>
           {sending ? "отправка…" : armed ? `подтвердить отправку (${targets.length} каналов)` : "отправить"}

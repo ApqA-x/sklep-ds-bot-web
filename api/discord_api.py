@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any
@@ -33,13 +34,33 @@ async def bot_request(
     *,
     json_body: dict | None = None,
     reason: str | None = None,
+    files: list[tuple[str, bytes, str]] | None = None,
 ) -> tuple[int, Any]:
-    """Bot-token call to Discord REST; returns (status, payload). No exception on 4xx."""
+    """Bot-token call to Discord REST; returns (status, payload). No exception on 4xx.
+
+    files: список (имя, байты, content_type) — тогда запрос уходит multipart,
+    а json_body кладётся в payload_json (так требует POST /channels/{id}/messages).
+    """
     headers = {"Authorization": f"Bot {cfg.discord_token}"}
     if reason:
         headers["X-Audit-Log-Reason"] = quote(reason)
+    kwargs: dict[str, Any]
+    if files:
+        form = aiohttp.FormData()
+        if json_body:
+            form.add_field("payload_json", json.dumps(json_body))
+        for index, (filename, blob, content_type) in enumerate(files):
+            form.add_field(
+                f"files[{index}]",
+                blob,
+                filename=filename,
+                content_type=content_type or "application/octet-stream",
+            )
+        kwargs = {"data": form}
+    else:
+        kwargs = {"json": json_body}
     async with aiohttp.ClientSession(headers=headers) as session:
-        async with session.request(method, f"{API}{path}", json=json_body) as response:
+        async with session.request(method, f"{API}{path}", **kwargs) as response:
             try:
                 payload = await response.json()
             except Exception:

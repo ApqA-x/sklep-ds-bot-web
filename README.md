@@ -99,10 +99,11 @@ workflow `publish.yml` соберёт `ghcr.io/apqa-x/sklep-ds-bot-web:0.1.0` (+
 | 2. SPA v1 | ✅ (роутинг, Leaderboard/Active/Sessions/User/Invites, recharts) |
 | 3. OAuth + права | ✅ (`api/auth.py`, `api/discord_api.py`, read-гейт Manage Guild, dev-mode без env) |
 | 4. Write-слой | ✅ (`api/models.py`, `api/mutations.py`, `api/write.py`, `web_audit_logs`, конфликт `expectedUpdatedAt`) |
-| 5. Discord-действия | ✅ (`api/bot.py`: роли/timeout/move/kick/сообщение/инвайты, rate-limit, audit) |
+| 5. Discord-действия | ✅ (`api/bot.py`: роли/timeout/move/kick/сообщение (текст + multipart-вложения)/инвайты, rate-limit, audit) |
 | 6. UI управления | ✅ (форма настроек, списки trusted/autoUnmute/stalker, панель действий, страница аудита) |
 | 6b. UI-правки 2026-09-22 | ✅ (Catppuccin Mocha; имена вместо id через `GET /names`; `origin` web/discord в аудите + фильтр; экран «Чат» — см. ниже) |
 | 6c. Аудит-правки + фото 2026-09-22 | ✅ (`a4918d8`, `01756cc`: читаемые «Детали» аудита, фильтры аудита (над кем/действие/статус/период/сортировка) и чата (канал/автор/тип/период/сортировка), пагинация лидерборда по 50 + клик по графику → профиль, подсказки команд и сетка каналов в настройках, хранение картинок чата — см. «Картинки чата» выше) |
+| 6d. Чат: мультивыбор каналов + отправка от бота 2026-09-23 | ✅ (фильтр ленты — выпадающий список с чекбоксами по историчным каналам, `channelId` — повторяемый параметр ≤100; панель «Отправить от бота»: текст ≤2000 + вложения ≤10 файлов/25 МБ (multipart), живые текстовые каналы из `/picker`, отправка в N каналов последовательно с двойным подтверждением) |
 | 7. Прод | ⬜ требуется на хосте: OAuth env, reverse proxy, `docker stack deploy` (чеклист ниже) |
 
 > **История чата**: экран и read-API (`GET /chat/channels`, `GET /chat`) готовы и читают коллекцию
@@ -117,7 +118,7 @@ workflow `publish.yml` соберёт `ghcr.io/apqa-x/sklep-ds-bot-web:0.1.0` (+
 2. В `bot/.env` добавить: `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`, `WEB_SESSION_SECRET` (32+ случайных байт, например `openssl rand -hex 32`), `WEB_PUBLIC_URL`.
 3. Запушить тег образа и заменить `:latest` на `v*` в `bot/docker-stack.yaml`: `image: ghcr.io/apqa-x/sklep-ds-bot-web:v0.1.0`.
 4. Картинки чата (опционально): на хосте `docker volume create dsbot-media`; в стеке — `MEDIA_DIR=/data/media` + монтирование тома gateway (rw) и web (ro). Без этого `/media` выключен, UI отдаёт ссылки Discord.
-5. Reverse proxy (Caddy/nginx/Traefik): TLS для `<домен>` → `web:8000` (сеть оверлея). Наружу публикация порта **не** нужна.
+5. Reverse proxy (Caddy/nginx/Traefik): TLS для `<домен>` → `web:8000` (сеть оверлея). Наружу публикация порта **не** нужна. Для вложений в «Отправить от бота» (до 25 МБ на файл, до 50 МБ на запрос) поднять лимит тела: nginx — `client_max_body_size 52m;`, Caddy — `request_body { max_size 52428800 }`.
 6. `docker stack deploy -c docker-stack.yaml bot`.
 7. Проверка: `curl https://<домен>/api/healthz` → `status: ok`; вход через Discord; сервер виден только если пользователь в нём и имеет Manage Guild.
 

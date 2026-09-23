@@ -6,6 +6,13 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import ValidationError
+from starlette.datastructures import UploadFile  # парсер создаёт базовый класс, fastapi лишь оборачивает его
+
+try:  # в starlette 0.40 исключение живёт в formparsers, в более новых переехало в exceptions
+    from starlette.formparsers import MultiPartException
+except ImportError:
+    from starlette.exceptions import MultiPartException
 
 from . import discord_api, mutations
 from .auth import actor_of, perms_for, require_guild_admin
@@ -29,6 +36,11 @@ router = APIRouter(
 _BUCKET_CAPACITY = 5.0
 _BUCKET_RATE = 2.0
 _buckets: dict[str, tuple[float, float]] = {}
+
+# вложения сообщений: лимиты Discord на файл — 25 МБ, держаем разумный потолок пачки
+MAX_FILES = 10
+MAX_FILE_BYTES = 25 * 1024 * 1024
+MAX_TOTAL_BYTES = 50 * 1024 * 1024
 
 KICK_MEMBERS = 1 << 2
 SNOWFLAKE_RE = re.compile(r"^\d{5,25}$")
@@ -64,13 +76,21 @@ def _cfg(request: Request) -> WebConfig:
     return request.app.state.config
 
 
-async def _call(request: Request, method: str, path: str, *, json_body: dict | None = None, reason: str | None = None):
+async def _call(
+    request: Request,
+    method: str,
+    path: str,
+    *,
+    json_body: dict | None = None,
+    reason: str | None = None,
+    files: list[tuple[str, bytes, str]] | None = None,
+):
     cfg = _cfg(request)
     if not cfg.discord_token:
         raise HTTPException(status_code=503, detail="bot token not configured")
     if not _allow(_guild(request)):
         raise HTTPException(status_code=429, detail="too many bot actions, slow down")
-    return await discord_api.bot_request(cfg, method, path, json_body=json_body, reason=reason)
+    return await discord_api.bot_request(cfg, method, path, json_body=json_body, reason=reason, files=files)
 
 
 def _finish(request: Request, action: str, arguments: dict[str, Any], status: int, payload: Any) -> dict:
@@ -158,13 +178,54 @@ async def member_kick(request: Request, guildId: str, userId: str, body: KickMem
 
 
 @router.post("/channel/{channelId}/message")
-async def channel_message(request: Request, guildId: str, channelId: str, body: ChannelMessageAction) -> dict:
+async def channel_message(request: Request, guildId: str, channelId: str) -> dict:
     _snowflake(guildId, "guildId")
     _snowflake(channelId, "channelId")
+    content, files = await _message_body(request)
+    json_body = {"content": content} if content else {}
     status, payload = await _call(
-        request, "POST", f"/channels/{channelId}/messages", json_body={"content": body.content}
+        request, "POST", f"/channels/{channelId}/messages", json_body=json_body or None, files=files or None
     )
-    return _finish(request, "message", {"channelId": channelId, "length": len(body.content)}, status, payload)
+    arguments: dict[str, Any] = {"channelId": channelId, "length": len(content)}
+    if files:
+        # в audit — только имена и размеры, не содержимое
+        arguments["attachments"] = [{"name": name, "size": len(blob)} for name, blob, _ in files]
+    return _finish(request, "message", arguments, status, payload)
+
+
+async def _message_body(request: Request) -> tuple[str, list[tuple[str, bytes, str]]]:
+    """Разбор тела сообщения: JSON {content}, multipart (content + files[]) или form."""
+    content_type = request.headers.get("content-type", "")
+    if not content_type.startswith(("multipart/form-data", "application/x-www-form-urlencoded")):
+        try:
+            body = ChannelMessageAction.model_validate(await request.json())
+        except (ValidationError, ValueError):
+            raise HTTPException(status_code=422, detail="content must be 1..2000 characters") from None
+        return body.content, []
+
+    try:
+        form = await request.form(max_files=MAX_FILES + 1)
+    except MultiPartException:
+        raise HTTPException(status_code=422, detail="invalid multipart body") from None
+    content = str(form.get("content") or "").strip()
+    if len(content) > 2000:
+        raise HTTPException(status_code=422, detail="content must be at most 2000 characters")
+    uploads = [item for item in form.getlist("files") if isinstance(item, UploadFile)]
+    if len(uploads) > MAX_FILES:
+        raise HTTPException(status_code=422, detail="too many files")
+    if not content and not uploads:
+        raise HTTPException(status_code=422, detail="content or files required")
+    files: list[tuple[str, bytes, str]] = []
+    total = 0
+    for up in uploads:
+        blob = await up.read()
+        if len(blob) > MAX_FILE_BYTES:
+            raise HTTPException(status_code=422, detail=f"file {up.filename!r} exceeds {MAX_FILE_BYTES} bytes")
+        total += len(blob)
+        if total > MAX_TOTAL_BYTES:
+            raise HTTPException(status_code=422, detail=f"total upload exceeds {MAX_TOTAL_BYTES} bytes")
+        files.append((up.filename or "file", blob, up.content_type or ""))
+    return content, files
 
 
 @router.post("/invite")

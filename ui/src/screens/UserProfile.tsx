@@ -22,13 +22,32 @@ import { DName, useMemberState, usePicker } from "../names";
 
 const PERIODS: Period[] = ["7d", "30d", "all"];
 
+type ChartKind = "hours" | "messages" | "invites";
+
+const CHARTS: { key: ChartKind; label: string }[] = [
+  { key: "hours", label: "Часы в войсе" },
+  { key: "messages", label: "Сообщения" },
+  { key: "invites", label: "Инвайты" },
+];
+
+function accentHex(value: number | null | undefined): string | null {
+  if (value === null || value === undefined || !Number.isFinite(value)) return null;
+  return `#${value.toString(16).padStart(6, "0")}`;
+}
+
 export default function UserProfile() {
   const { guildId = "", userId = "" } = useParams();
   const canWrite = useCanWrite(guildId);
   const [period, setPeriod] = useState<Period>("30d");
+  const [chartKind, setChartKind] = useState<ChartKind>("hours");
   const query = useQuery({
     queryKey: ["user", guildId, userId, period],
     queryFn: () => api.userProfile(guildId, userId, period),
+  });
+  const card = useQuery({
+    queryKey: ["userCard", guildId, userId],
+    queryFn: () => api.userCard(guildId, userId),
+    staleTime: 300_000,
   });
   const picker = usePicker(guildId);
   const member = useMemberState(guildId, userId, true);
@@ -56,10 +75,14 @@ export default function UserProfile() {
 
   const p = query.data;
   if (!p) return null;
-  const daily = p.daily.map((d) => ({
-    date: d.date.slice(5),
-    hours: Math.round((d.ms / 3_600_000) * 100) / 100,
-  }));
+  const c = card.data;
+  const displayName = c?.nick || c?.globalName || p.userName;
+  const chartData =
+    chartKind === "hours"
+      ? p.daily.map((d) => ({ date: d.date.slice(5), value: Math.round((d.ms / 3_600_000) * 100) / 100 }))
+      : chartKind === "messages"
+        ? p.dailyMessages.map((d) => ({ date: d.date.slice(5), value: d.count }))
+        : p.dailyInvites.map((d) => ({ date: d.date.slice(5), value: d.count }));
   const byPosition = new Map((picker.data?.roles ?? []).map((r) => [r.id, r.position]));
   const orderedRoles = [...roleIds].sort((a, b) => (byPosition.get(b) ?? -1) - (byPosition.get(a) ?? -1));
 
@@ -74,26 +97,71 @@ export default function UserProfile() {
           onChange={(e) => setPeriod(e.value as Period)}
         />
       </div>
-      <Section title={p.userName}>
-        <p className="muted">
-          <a href={discordUserUrl(p.userId)} target="_blank" rel="noreferrer">
-            {p.userId}
-          </a>{" "}
-          · заходов за период: {p.appearances} · время: {fmtDuration(p.totalMs)} · сообщений:{" "}
-          {p.messageCount.toLocaleString("ru-RU")} · пригласил: {p.invitedCount}
-        </p>
-        {daily.length > 0 && (
+      <div className="profile-card" style={c?.bannerUrl ? { backgroundImage: `url(${c.bannerUrl})` } : undefined}>
+        {c && (
+          <img className="profile-avatar" src={c.avatarUrl} alt="" width={88} height={88} referrerPolicy="no-referrer" />
+        )}
+        <div className="profile-meta">
+          <h2 style={c?.accentColor ? { color: accentHex(c.accentColor) ?? undefined } : undefined}>{displayName}</h2>
+          <p className="muted tiny">
+            {c?.source === "discord" && c.username ? (
+              <>
+                @{c.username}
+                {c.globalName && c.globalName !== displayName ? <> · {c.globalName}</> : null}
+                {c.joinedAt ? <> · на сервере с {fmtDate(c.joinedAt)}</> : null}
+              </>
+            ) : (
+              "данные Discord о профиле недоступны"
+            )}
+          </p>
+          <p className="muted">
+            <a href={discordUserUrl(p.userId)} target="_blank" rel="noreferrer">
+              {p.userId}
+            </a>{" "}
+            · заходов за период: {p.appearances} · время: {fmtDuration(p.totalMs)} · сообщений:{" "}
+            {p.messageCount.toLocaleString("ru-RU")} · пригласил: {p.invitedCount}
+          </p>
+          {(c?.avatars.length ?? 0) > 0 && (
+            <div className="avatar-history" title="История аватарок (копится с момента запуска фичи)">
+              {c!.avatars.map((a) => (
+                <a key={a.hash} href={a.url} target="_blank" rel="noreferrer">
+                  <img
+                    src={a.url}
+                    alt={`${a.kind} ${fmtDate(a.firstSeen ?? "")}`}
+                    width={44}
+                    height={44}
+                    referrerPolicy="no-referrer"
+                  />
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      <Section title="Активность">
+        <div className="toolbar">
+          <SelectButton
+            className="chip-group"
+            value={chartKind}
+            options={CHARTS.map((x) => ({ label: x.label, value: x.key }))}
+            optionValue="value"
+            onChange={(e) => setChartKind(e.value as ChartKind)}
+          />
+        </div>
+        {chartData.length > 0 ? (
           <div className="chart">
             <ResponsiveContainer width="100%" height={220}>
-              <LineChart data={daily}>
+              <LineChart data={chartData}>
                 <Grid />
                 <XAxis dataKey="date" />
                 <YAxis />
                 <Tooltip />
-                <Line type="monotone" dataKey="hours" stroke="#cba6f7" dot={false} />
+                <Line type="monotone" dataKey="value" stroke="#cba6f7" dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
+        ) : (
+          <Empty>За этот период активности не было.</Empty>
         )}
       </Section>
       <Section title="Как попал на сервер">

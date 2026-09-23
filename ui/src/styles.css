@@ -499,6 +499,84 @@ pre.inline {
   stroke: var(--surface2);
 }
 
+/* текст ВНУТРИ графиков: подписи значений на столбцах и тултипы — чёрные на светлом */
+.chart .recharts-tooltip-wrapper .recharts-default-tooltip {
+  background: #fff !important;
+  border: 1px solid var(--surface2) !important;
+  border-radius: 8px;
+}
+.chart .recharts-tooltip-label,
+.chart .recharts-tooltip-item,
+.chart .recharts-tooltip-item-name,
+.chart .recharts-tooltip-item-value,
+.chart .recharts-label-list text {
+  color: #000 !important;
+  fill: #000 !important;
+  font-weight: 600;
+}
+
+.userlink {
+  color: var(--mauve);
+  text-decoration: none;
+}
+.userlink:hover {
+  text-decoration: underline;
+}
+
+/* шапка профиля: банер фоном, аватар сверху, ники справа */
+.profile-card {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-end;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background-color: var(--surface2);
+  background-size: cover;
+  background-position: center;
+  min-height: 110px;
+}
+.profile-card .profile-avatar {
+  border-radius: 50%;
+  border: 3px solid var(--bg);
+  background: var(--bg);
+  flex: none;
+}
+.profile-meta {
+  min-width: 0;
+}
+.profile-meta h2 {
+  margin: 0 0 2px;
+}
+.avatar-history {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.avatar-history img {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  display: block;
+}
+.avatar-history img:hover {
+  outline: 2px solid var(--mauve);
+}
+.discord-details .diff-line {
+  display: block;
+}
+.tiny-chip {
+  display: inline-block;
+  margin: 0 3px 2px 0;
+  padding: 0 7px;
+  border: 1px solid var(--surface2);
+  border-radius: 10px;
+  font-size: 0.82em;
+}
+
 .home h1 {
   margin-bottom: 0.3rem;
   color: var(--mauve);

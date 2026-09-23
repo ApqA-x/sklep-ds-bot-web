@@ -5,7 +5,7 @@ import type {
   ChatChannel,
   ChatLeaderboard,
   ChatMessagesPage,
-  DiscordAuditEntry,
+  DiscordAuditPage,
   GuildAccess,
   GuildSettingsDoc,
   Health,
@@ -19,6 +19,7 @@ import type {
   SessionDetail,
   SessionPage,
   StalkerSubscription,
+  UserCard,
   UserProfile,
   Whoami,
 } from "./types";
@@ -150,6 +151,9 @@ export const api = {
   memberState: (guildId: string, userId: string) =>
     apiGet<MemberState>(`/api/guild/${guildId}/users/${userId}/member`),
 
+  userCard: (guildId: string, userId: string) =>
+    apiGet<UserCard>(`/api/guild/${guildId}/users/${userId}/card`),
+
   chatChannels: (guildId: string) =>
     apiGet<{ guildId: string; items: ChatChannel[] }>(`/api/guild/${guildId}/chat/channels`),
 
@@ -208,9 +212,39 @@ export const api = {
       `/api/guild/${guildId}/audit/actions`,
     ),
 
-  auditDiscord: (guildId: string, limit = 100) =>
-    apiGet<{ guildId: string; source: string; items: DiscordAuditEntry[] }>(
-      `/api/guild/${guildId}/audit/discord?limit=${limit}`,
+  auditDiscord: (
+    guildId: string,
+    opts: {
+      page?: number;
+      size?: number;
+      actionType?: number;
+      actor?: string;
+      target?: string;
+      dateFrom?: string;
+      dateTo?: string;
+      sort?: "asc" | "desc";
+    } = {},
+  ) => {
+    const p = new URLSearchParams();
+    p.set("page", String(opts.page ?? 1));
+    p.set("size", String(opts.size ?? 50));
+    if (opts.actionType) p.set("actionType", String(opts.actionType));
+    for (const key of ["actor", "target", "dateFrom", "dateTo", "sort"] as const) {
+      const value = opts[key];
+      if (value) p.set(key, value);
+    }
+    return apiGet<DiscordAuditPage>(`/api/guild/${guildId}/audit/discord?${p.toString()}`);
+  },
+
+  auditDiscordActions: (guildId: string) =>
+    apiGet<{ guildId: string; items: { actionType: number; action: string; count: number }[] }>(
+      `/api/guild/${guildId}/audit/discord/actions`,
+    ),
+
+  auditDiscordSync: (guildId: string) =>
+    apiSend<{ guildId: string; ok: boolean; discordStatus: number; inserted: number; error?: string }>(
+      "POST",
+      `/api/guild/${guildId}/audit/discord/sync`,
     ),
 
   botRole: (guildId: string, userId: string, roleId: string, action: "grant" | "revoke") =>

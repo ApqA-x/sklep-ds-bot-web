@@ -126,9 +126,33 @@ export type UserProfile = {
   messageCount: number;
   invitedCount: number;
   daily: DailyUsage[];
+  dailyMessages: { date: string; count: number }[];
+  dailyInvites: { date: string; count: number }[];
   roleIds: string[];
   nicknames: NicknameChange[];
   join: JoinInfo;
+};
+
+export type UserAvatar = {
+  hash: string;
+  kind: "guild" | "global" | string;
+  url: string;
+  firstSeen: string | null;
+  lastSeen: string | null;
+};
+
+export type UserCard = {
+  guildId: string;
+  userId: string;
+  source: "discord" | "unavailable" | string;
+  username: string | null;
+  globalName: string | null;
+  nick: string | null;
+  joinedAt: string | null;
+  avatarUrl: string;
+  bannerUrl: string | null;
+  accentColor: number | null;
+  avatars: UserAvatar[];
 };
 
 export type InviteAttribution = {
@@ -210,6 +234,17 @@ export type DiscordAuditEntry = {
   count: string | number | null;
   deleteMessageDays: string | number | null;
   reason: string;
+  changes: { key: string; new: unknown; old: unknown }[];
+  options: Record<string, string>;
+};
+
+export type DiscordAuditPage = {
+  guildId: string;
+  source: string;
+  page: number;
+  size: number;
+  total: number;
+  items: DiscordAuditEntry[];
 };
 
 export type NamesPayload = {

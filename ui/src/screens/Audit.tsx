@@ -6,11 +6,12 @@ import { Dropdown } from "primereact/dropdown";
 import { SelectButton } from "primereact/selectbutton";
 import { api } from "../api/client";
 import { AuditDetails } from "../components/auditText";
+import { UserLink } from "../components/userLink";
 import { TargetUserPicker } from "../components/userSearch";
 import { DateField } from "../components/dateField";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDate } from "../lib/format";
-import { DName } from "../names";
+import { AuditDiscord } from "./AuditDiscord";
 
 type OriginFilter = "" | "web" | "discord";
 type AuditSource = "site" | "discord";
@@ -84,13 +85,6 @@ export default function Audit() {
     enabled: source === "site",
   });
 
-  const discord = useQuery({
-    queryKey: ["audit-discord", guildId],
-    queryFn: () => api.auditDiscord(guildId, 100),
-    enabled: source === "discord",
-    staleTime: 30_000,
-  });
-
   const sourceToggle = (
     <SelectButton
       className="chip-group"
@@ -101,62 +95,7 @@ export default function Audit() {
     />
   );
 
-  if (source === "discord") {
-    return (
-      <Section title="Журнал аудита Discord">
-        <div className="toolbar">
-          {sourceToggle}
-          <span className="muted tiny">последние ≤100 записей журнала сервера Discord</span>
-          <span style={{ flex: 1 }} />
-          <Button icon="pi pi-refresh" loading={discord.isFetching} onClick={() => discord.refetch()} />
-        </div>
-        {discord.isLoading ? (
-          <Loading />
-        ) : discord.isError ? (
-          <ErrorBox error={discord.error} />
-        ) : (discord.data?.items.length ?? 0) === 0 ? (
-          <Empty>В журнале Discord по этому серверу пока нет записей.</Empty>
-        ) : (
-          <table>
-            <thead>
-              <tr>
-                <th>Когда</th>
-                <th>Кто</th>
-                <th>Что</th>
-                <th>Над кем</th>
-                <th>Где</th>
-                <th>Причина</th>
-              </tr>
-            </thead>
-            <tbody>
-              {discord.data?.items.map((entry) => (
-                <tr key={entry.id}>
-                  <td>{fmtDate(entry.at)}</td>
-                  <td title={entry.actorUserId || ""}>
-                    {entry.actorName ||
-                      (entry.actorUserId ? <DName kind="user" id={entry.actorUserId} /> : "—")}
-                  </td>
-                  <td title={`Действие ${entry.actionType}`}>{entry.action}</td>
-                  <td title={entry.targetUserId || entry.targetId || ""}>
-                    {entry.targetUserName ||
-                      (entry.targetUserId ? (
-                        <DName kind="user" id={entry.targetUserId} />
-                      ) : entry.targetId ? (
-                        `ID ${entry.targetId}`
-                      ) : (
-                        "—"
-                      ))}
-                  </td>
-                  <td>{entry.channelId ? <DName kind="channel" id={entry.channelId} /> : "—"}</td>
-                  <td>{entry.reason || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </Section>
-    );
-  }
+  if (source === "discord") return <AuditDiscord guildId={guildId} toolbarExtra={sourceToggle} />;
 
   if (query.isLoading) return <Loading />;
   if (query.isError) return <ErrorBox error={query.error} />;
@@ -331,10 +270,8 @@ export default function Audit() {
                   <OriginBadge origin={item.origin} />
                 </td>
                 <td title={item.actorUserId}>
-                  {item.actorName ? (
-                    item.actorName
-                  ) : item.actorUserId ? (
-                    <DName kind="user" id={item.actorUserId} />
+                  {item.actorUserId ? (
+                    <UserLink userId={item.actorUserId} name={item.actorName || undefined} />
                   ) : (
                     "—"
                   )}

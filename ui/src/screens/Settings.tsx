@@ -62,6 +62,8 @@ const EDITABLE_KEYS = [
   "fallbackSummaryChannelId",
   "autoRoleId",
   "soundboardEnforcementEnabled",
+  "autoRestoreRoles",
+  "autoRestoreNicknames",
   "activityChannelId",
   "activityCategoryChannelIds",
   "activityEventTypes",
@@ -495,6 +497,36 @@ export default function Settings() {
               {" "}
               — если участник включает звук саундборда в курируемом ботом голосовом канале, бот отключит его от
               голоса
+            </span>
+          </span>
+        </label>
+        <label className="check">
+          <Checkbox
+            disabled={!canWrite}
+            checked={Boolean(form.autoRestoreRoles)}
+            onChange={() => set("autoRestoreRoles", !Boolean(form.autoRestoreRoles))}
+          />
+          <span>
+            Возвращать роли при входе
+            <span className="muted tiny">
+              {" "}
+              — когда участник выходит с сервера, бот запоминает его роли и возвращает их при повторном входе
+              (по умолчанию включено)
+            </span>
+          </span>
+        </label>
+        <label className="check">
+          <Checkbox
+            disabled={!canWrite}
+            checked={Boolean(form.autoRestoreNicknames)}
+            onChange={() => set("autoRestoreNicknames", !Boolean(form.autoRestoreNicknames))}
+          />
+          <span>
+            Возвращать ник при входе
+            <span className="muted tiny">
+              {" "}
+              — то же для никнейма на сервере: сохраняется при выходе и восстанавливается при входе (по умолчанию
+              включено)
             </span>
           </span>
         </label>

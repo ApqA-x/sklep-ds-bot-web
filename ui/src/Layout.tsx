@@ -29,6 +29,7 @@ export default function Layout() {
             <NavLink to={`/g/${guildId}/sessions`}>Сессии</NavLink>
             <NavLink to={`/g/${guildId}/invites`}>Инвайты</NavLink>
             <NavLink to={`/g/${guildId}/chat`}>Чат</NavLink>
+            <NavLink to={`/g/${guildId}/chat-leaderboard`}>Топ чата</NavLink>
             <NavLink to={`/g/${guildId}/settings`}>Настройки</NavLink>
             <NavLink to={`/g/${guildId}/audit`}>Аудит</NavLink>
           </nav>

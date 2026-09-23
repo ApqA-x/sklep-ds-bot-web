@@ -25,6 +25,24 @@ export type Leaderboard = {
   items: LeaderboardItem[];
 };
 
+export type ChatLeaderboardItem = {
+  userId: string;
+  userName: string;
+  messages: number;
+  channels: number;
+  lastMessageAt: string | null;
+};
+
+export type ChatLeaderboard = {
+  guildId: string;
+  period: Period;
+  limit: number;
+  page: number;
+  total: number;
+  cached: boolean;
+  items: ChatLeaderboardItem[];
+};
+
 export type ParticipantBrief = {
   userId: string;
   userName: string;

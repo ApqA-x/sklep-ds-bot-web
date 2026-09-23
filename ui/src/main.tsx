@@ -11,6 +11,7 @@ import Layout from "./Layout";
 import { GuildProvider } from "./guild";
 import Home from "./screens/Home";
 import Leaderboard from "./screens/Leaderboard";
+import ChatLeaderboard from "./screens/ChatLeaderboard";
 import Active from "./screens/Active";
 import Sessions from "./screens/Sessions";
 import SessionDetail from "./screens/SessionDetail";
@@ -54,6 +55,7 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/g/:guildId">
                 <Route index element={<Navigate to="leaderboard" replace />} />
                 <Route path="leaderboard" element={<Leaderboard />} />
+                <Route path="chat-leaderboard" element={<ChatLeaderboard />} />
                 <Route path="active" element={<Active />} />
                 <Route path="sessions" element={<Sessions />} />
                 <Route path="sessions/:sessionId" element={<SessionDetail />} />

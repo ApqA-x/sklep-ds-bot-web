@@ -3,6 +3,7 @@ import type {
   ActiveSession,
   AuditPage,
   ChatChannel,
+  ChatLeaderboard,
   ChatMessagesPage,
   GuildAccess,
   GuildSettingsDoc,
@@ -78,6 +79,11 @@ export const api = {
   leaderboard: (guildId: string, period: Period, limit = 50, page = 1) =>
     apiGet<Leaderboard>(
       `/api/guild/${guildId}/leaderboard?period=${period}&limit=${limit}&page=${page}`,
+    ),
+
+  chatLeaderboard: (guildId: string, period: Period, limit = 50, page = 1) =>
+    apiGet<ChatLeaderboard>(
+      `/api/guild/${guildId}/chat-leaderboard?period=${period}&limit=${limit}&page=${page}`,
     ),
 
   activeSessions: (guildId: string) =>

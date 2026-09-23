@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote
 
@@ -238,6 +239,114 @@ def build_voice_channels(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def build_text_channels(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return _channels_of_types(rows, TEXT_CHANNEL_TYPES)
+
+
+DISCORD_EPOCH_MS = 1420070400000
+
+# AuditLogEvent -> читаемое имя (полный набор не нужен: остальное показываем кодом)
+AUDIT_ACTION_NAMES: dict[int, str] = {
+    1: "Изменение сервера",
+    10: "Создание канала",
+    11: "Изменение канала",
+    12: "Удаление канала",
+    13: "Создание прав канала",
+    14: "Изменение прав канала",
+    15: "Удаление прав канала",
+    20: "Кик участника",
+    21: "Пачка кика (prune)",
+    22: "Бан участника",
+    23: "Разбан участника",
+    24: "Изменение участника",
+    25: "Изменение ролей участника",
+    26: "Перемещение в голосе",
+    27: "Отключение от голоса",
+    28: "Добавление бота",
+    30: "Создание роли",
+    31: "Изменение роли",
+    32: "Удаление роли",
+    40: "Создание инвайта",
+    41: "Изменение инвайта",
+    42: "Удаление инвайта",
+    50: "Создание вебхука",
+    51: "Изменение вебхука",
+    52: "Удаление вебхука",
+    60: "Создание эмодзи",
+    61: "Изменение эмодзи",
+    62: "Удаление эмодзи",
+    72: "Удаление сообщения",
+    73: "Массовое удаление сообщений",
+    74: "Закрепление сообщения",
+    75: "Открепление сообщения",
+    80: "Создание интеграции",
+    81: "Изменение интеграции",
+    82: "Удаление интеграции",
+    83: "Создание сцены",
+    84: "Изменение сцены",
+    85: "Удаление сцены",
+    90: "Создание стикера",
+    91: "Изменение стикера",
+    92: "Удаление стикера",
+    110: "Создание треда",
+    111: "Изменение треда",
+    112: "Удаление треда",
+    121: "Права слэш-команд",
+    140: "Создание события",
+    141: "Изменение события",
+    142: "Удаление события",
+    144: "Автомод: блокировка сообщения",
+    145: "Автомод: флаг в канал",
+    146: "Автомод: мьют участника",
+    147: "Автомод: создание правила",
+    148: "Автомод: изменение правила",
+    149: "Автомод: удаление правила",
+}
+
+
+def snowflake_to_iso(value: str) -> str:
+    try:
+        ms = (int(value) >> 22) + DISCORD_EPOCH_MS
+    except (TypeError, ValueError):
+        return ""
+    return datetime.fromtimestamp(ms / 1000, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+# Действия, у которых target_id — это id участника (у них нет отдельного target_user_id)
+USER_TARGET_ACTIONS = {20, 22, 23, 24, 25, 26, 27, 28}
+
+
+def build_audit_log_entries(rows: list[dict[str, Any]], users: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Discord GET /guilds/{id}/audit-logs -> компактные строки для экрана «Аудит»."""
+    names = {str(u.get("id") or ""): str(u.get("username") or "") for u in users if u.get("id")}
+    out: list[dict[str, Any]] = []
+    for row in rows:
+        entry_id = str(row.get("id") or "")
+        if not entry_id:
+            continue
+        action_type = int(row.get("action_type") or 0)
+        actor_id = str(row.get("user_id") or "")
+        target_id = str(row.get("target_id") or "")
+        target_user_id = str(row.get("target_user_id") or "")
+        if not target_user_id and action_type in USER_TARGET_ACTIONS:
+            target_user_id = target_id
+        options = row.get("options") or {}
+        out.append(
+            {
+                "id": entry_id,
+                "at": snowflake_to_iso(entry_id),
+                "actionType": action_type,
+                "action": AUDIT_ACTION_NAMES.get(action_type, f"Действие {action_type}"),
+                "actorUserId": actor_id,
+                "actorName": names.get(actor_id, ""),
+                "targetUserId": target_user_id,
+                "targetUserName": names.get(target_user_id, ""),
+                "targetId": target_id,
+                "channelId": str(options.get("channel_id") or ""),
+                "count": options.get("count"),
+                "deleteMessageDays": options.get("delete_message_days"),
+                "reason": str(row.get("reason") or ""),
+            }
+        )
+    return out
 
 
 async def get_member(cfg: WebConfig, guild_id: str, user_id: str) -> dict[str, Any] | None:

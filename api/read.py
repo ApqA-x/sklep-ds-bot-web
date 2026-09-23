@@ -175,6 +175,30 @@ async def member_state(request: Request, guildId: str, userId: str) -> dict:
     }
 
 
+@router.get("/audit/discord")
+async def audit_discord(request: Request, guildId: str, limit: int = Query(80, ge=1, le=100)) -> dict:
+    """Журнал аудита самого Discord (кик/бан/роли/удаление сообщений и т.п.) через бот-токен."""
+    guild = _snowflake(guildId, "guildId")
+    from . import discord_api
+
+    cfg = request.app.state.config
+    if not cfg.discord_token:
+        raise HTTPException(status_code=503, detail="bot token not configured")
+    status, payload = await discord_api.bot_request(cfg, "GET", f"/guilds/{guild}/audit-logs?limit={limit}")
+    if status == 403:
+        raise HTTPException(
+            status_code=502,
+            detail="Discord отказал (403): у роли бота нет разрешения «Просматривать журнал аудита»",
+        )
+    if not 200 <= status < 300:
+        raise HTTPException(status_code=502, detail=f"Discord API вернул статус {status}")
+    body = payload if isinstance(payload, dict) else {}
+    items = discord_api.build_audit_log_entries(
+        list(body.get("audit_log_entries") or []), list(body.get("users") or [])
+    )
+    return {"guildId": guild, "source": "discord", "items": items}
+
+
 @router.get("/chat/channels")
 def chat_channels(request: Request, guildId: str) -> dict:
     guild = _snowflake(guildId, "guildId")

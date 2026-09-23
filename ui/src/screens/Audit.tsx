@@ -13,6 +13,12 @@ import { fmtDate } from "../lib/format";
 import { DName } from "../names";
 
 type OriginFilter = "" | "web" | "discord";
+type AuditSource = "site" | "discord";
+
+const SOURCES: { key: AuditSource; label: string }[] = [
+  { key: "site", label: "Журнал сайта" },
+  { key: "discord", label: "Журнал Discord" },
+];
 
 const FILTERS: { key: OriginFilter; label: string }[] = [
   { key: "", label: "Все" },
@@ -40,6 +46,7 @@ function OriginBadge({ origin }: { origin: "web" | "discord" | undefined }) {
 
 export default function Audit() {
   const { guildId = "" } = useParams();
+  const [source, setSource] = useState<AuditSource>("site");
   const [page, setPage] = useState(1);
   const [showFilters, setShowFilters] = useState(false);
   const [origin, setOrigin] = useState<OriginFilter>("");
@@ -67,13 +74,89 @@ export default function Audit() {
         sort,
       }),
     placeholderData: (prev) => prev,
+    enabled: source === "site",
   });
 
   const facets = useQuery({
     queryKey: ["audit-actions", guildId],
     queryFn: () => api.auditActions(guildId),
     staleTime: 300_000,
+    enabled: source === "site",
   });
+
+  const discord = useQuery({
+    queryKey: ["audit-discord", guildId],
+    queryFn: () => api.auditDiscord(guildId, 100),
+    enabled: source === "discord",
+    staleTime: 30_000,
+  });
+
+  const sourceToggle = (
+    <SelectButton
+      className="chip-group"
+      value={source}
+      options={SOURCES.map((s) => ({ label: s.label, value: s.key }))}
+      optionValue="value"
+      onChange={(e) => setSource(e.value as AuditSource)}
+    />
+  );
+
+  if (source === "discord") {
+    return (
+      <Section title="Журнал аудита Discord">
+        <div className="toolbar">
+          {sourceToggle}
+          <span className="muted tiny">последние ≤100 записей журнала сервера Discord</span>
+          <span style={{ flex: 1 }} />
+          <Button icon="pi pi-refresh" loading={discord.isFetching} onClick={() => discord.refetch()} />
+        </div>
+        {discord.isLoading ? (
+          <Loading />
+        ) : discord.isError ? (
+          <ErrorBox error={discord.error} />
+        ) : (discord.data?.items.length ?? 0) === 0 ? (
+          <Empty>В журнале Discord по этому серверу пока нет записей.</Empty>
+        ) : (
+          <table>
+            <thead>
+              <tr>
+                <th>Когда</th>
+                <th>Кто</th>
+                <th>Что</th>
+                <th>Над кем</th>
+                <th>Где</th>
+                <th>Причина</th>
+              </tr>
+            </thead>
+            <tbody>
+              {discord.data?.items.map((entry) => (
+                <tr key={entry.id}>
+                  <td>{fmtDate(entry.at)}</td>
+                  <td title={entry.actorUserId || ""}>
+                    {entry.actorName ||
+                      (entry.actorUserId ? <DName kind="user" id={entry.actorUserId} /> : "—")}
+                  </td>
+                  <td title={`Действие ${entry.actionType}`}>{entry.action}</td>
+                  <td title={entry.targetUserId || entry.targetId || ""}>
+                    {entry.targetUserName ||
+                      (entry.targetUserId ? (
+                        <DName kind="user" id={entry.targetUserId} />
+                      ) : entry.targetId ? (
+                        `ID ${entry.targetId}`
+                      ) : (
+                        "—"
+                      ))}
+                  </td>
+                  <td>{entry.channelId ? <DName kind="channel" id={entry.channelId} /> : "—"}</td>
+                  <td>{entry.reason || "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Section>
+    );
+  }
 
   if (query.isLoading) return <Loading />;
   if (query.isError) return <ErrorBox error={query.error} />;
@@ -105,6 +188,7 @@ export default function Audit() {
   return (
     <Section title={`Журнал изменений (${data.total})`}>
       <div className="toolbar">
+        {sourceToggle}
         <Button
           className={showFilters || hasFilters ? "chip active" : "chip"}
           onClick={() => setShowFilters((v) => !v)}

@@ -183,6 +183,77 @@ def test_member_state_unavailable_without_token() -> None:
     assert client.get(f"/api/guild/{GUILD}/users/bad/member").status_code == 422
 
 
+def test_snowflake_to_iso() -> None:
+    # id=1 -> эпоха Discord 2015-01-01T00:00:00Z
+    assert discord_api.snowflake_to_iso("1") == "2015-01-01T00:00:00Z"
+    assert discord_api.snowflake_to_iso("bad") == ""
+
+
+def test_audit_discord_maps_entries(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, str]] = []
+    entry_id = "1300000000000000000"
+
+    async def fake_request(cfg, method, path, *, json_body=None, reason=None, files=None):
+        calls.append((method, path))
+        return 200, {
+            "audit_log_entries": [
+                {
+                    "id": entry_id,
+                    "user_id": USER,
+                    "action_type": 20,
+                    "target_user_id": "160000000000000002",
+                    "target_id": "160000000000000002",
+                    "options": {"channel_id": CHANNEL, "count": "5"},
+                    "reason": "spam",
+                },
+                {"id": "1300000000000000001", "action_type": 999},
+                {
+                    # у реальных записей действий с участником нет target_user_id — цель в target_id
+                    "id": "1300000000000000002",
+                    "user_id": USER,
+                    "action_type": 25,
+                    "target_id": "160000000000000002",
+                },
+                {"action_type": 22},  # без id — пропускаем
+            ],
+            "users": [{"id": USER, "username": "admin"}, {"id": "160000000000000002", "username": "victim"}],
+        }
+
+    monkeypatch.setattr(discord_api, "bot_request", fake_request)
+    client = _client()
+    response = client.get(f"/api/guild/{GUILD}/audit/discord?limit=50")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["source"] == "discord"
+    assert calls[-1] == ("GET", f"/guilds/{GUILD}/audit-logs?limit=50")
+    assert len(body["items"]) == 3
+    first = body["items"][0]
+    assert first["action"] == "Кик участника"
+    assert first["actionType"] == 20
+    assert first["at"] == discord_api.snowflake_to_iso(entry_id)
+    assert first["actorName"] == "admin"
+    assert first["targetUserName"] == "victim"
+    assert first["channelId"] == CHANNEL
+    assert first["count"] == "5"
+    assert first["reason"] == "spam"
+    assert body["items"][1]["action"] == "Действие 999"  # неизвестный тип — читаемый фолбэк
+    role_entry = body["items"][2]
+    assert role_entry["action"] == "Изменение ролей участника"
+    assert role_entry["targetUserId"] == "160000000000000002"  # подставлен из target_id
+    assert role_entry["targetUserName"] == "victim"
+
+
+def test_audit_discord_403_hint_and_no_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def forbidden(cfg, method, path, *, json_body=None, reason=None, files=None):
+        return 403, {"message": "Missing Permissions"}
+
+    monkeypatch.setattr(discord_api, "bot_request", forbidden)
+    response = _client().get(f"/api/guild/{GUILD}/audit/discord")
+    assert response.status_code == 502
+    assert "журнал аудита" in response.json()["detail"].lower()
+    assert _client(discord_token="").get(f"/api/guild/{GUILD}/audit/discord").status_code == 503
+
+
 def test_missing_bot_token_503() -> None:
     client = _client(discord_token="")  # бот-токен не настроен
     response = client.post(

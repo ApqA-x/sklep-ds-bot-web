@@ -5,6 +5,7 @@ import type {
   ChatChannel,
   ChatLeaderboard,
   ChatMessagesPage,
+  DiscordAuditEntry,
   GuildAccess,
   GuildSettingsDoc,
   Health,
@@ -205,6 +206,11 @@ export const api = {
   auditActions: (guildId: string) =>
     apiGet<{ guildId: string; items: { action: string; count: number }[] }>(
       `/api/guild/${guildId}/audit/actions`,
+    ),
+
+  auditDiscord: (guildId: string, limit = 100) =>
+    apiGet<{ guildId: string; source: string; items: DiscordAuditEntry[] }>(
+      `/api/guild/${guildId}/audit/discord?limit=${limit}`,
     ),
 
   botRole: (guildId: string, userId: string, roleId: string, action: "grant" | "revoke") =>

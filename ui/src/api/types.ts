@@ -196,6 +196,22 @@ export type AuditPage = {
   items: AuditItem[];
 };
 
+export type DiscordAuditEntry = {
+  id: string;
+  at: string;
+  actionType: number;
+  action: string;
+  actorUserId: string;
+  actorName: string;
+  targetUserId: string;
+  targetUserName: string;
+  targetId: string;
+  channelId: string;
+  count: string | number | null;
+  deleteMessageDays: string | number | null;
+  reason: string;
+};
+
 export type NamesPayload = {
   guildId: string;
   guildName: string | null;

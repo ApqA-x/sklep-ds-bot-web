@@ -74,3 +74,18 @@ def test_spa_catchall_does_not_shadow_api() -> None:
     response = client.get("/")
     # without a built ui the catch-all reports 503 instead of leaking errors
     assert response.status_code in {200, 503}
+
+
+def test_spa_cache_headers(tmp_path, monkeypatch) -> None:
+    dist = (tmp_path / "dist").resolve()
+    (dist / "assets").mkdir(parents=True)
+    (dist / "assets" / "index-abc123.js").write_text("js")
+    (dist / "index.html").write_text("<html>")
+    monkeypatch.setattr("api.main.UI_DIST", dist)
+    client = _client(FakePingableMongo())
+    asset = client.get("/assets/index-abc123.js")
+    assert asset.status_code == 200
+    assert "immutable" in asset.headers["cache-control"]
+    page = client.get("/any/client/route")
+    assert page.status_code == 200
+    assert "no-store" in page.headers["cache-control"]

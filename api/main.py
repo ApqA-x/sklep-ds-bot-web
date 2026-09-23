@@ -150,16 +150,22 @@ def create_app(
         app.mount("/media", StaticFiles(directory=str(media_root)), name="media")
 
     # SPA catch-all: serve built ui/dist assets, fall back to index.html for client routes.
+    # Хэшированные ассеты (assets/index-<hash>.js) можно кэшировать навечно, а index.html
+    # — никогда, иначе браузер держит старый бандл после пересборки.
     @app.get("/{full_path:path}", response_model=None)
     def spa(request: Request, full_path: str) -> Response:
         if full_path.startswith("api/"):
             return JSONResponse({"detail": "not found"}, status_code=404)
         static = _static_file(full_path)
         if static is not None:
-            return FileResponse(static)
+            if static.parent == UI_DIST / "assets":
+                cache = "public, max-age=31536000, immutable"
+            else:
+                cache = "no-cache, no-store, must-revalidate"
+            return FileResponse(static, headers={"Cache-Control": cache})
         index = UI_DIST / "index.html"
         if index.is_file():
-            return FileResponse(index)
+            return FileResponse(index, headers={"Cache-Control": "no-cache, no-store, must-revalidate"})
         return JSONResponse(
             {"detail": "ui not built — run `npm ci && npm run build` in ui/ or use the docker image"},
             status_code=503,

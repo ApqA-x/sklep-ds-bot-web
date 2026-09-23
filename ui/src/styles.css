@@ -286,11 +286,34 @@ button:disabled {
   padding-top: 0.6rem;
 }
 
+/* Период в фильтрах (Audit/Chat): обёртки .chart-control растворяются в сетке
+   (display: contents), поэтому метка и поле падают прямо в grid-ячейки.
+   Колонка меток — по самой широкой («по»), значит оба поля начинаются с одной X
+   и стоят строго друг под другом; текст «с»/«по» прижимается к левому краю. */
 .filter-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.6rem;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.4rem 0.5rem;
   align-items: center;
+}
+
+.filter-row > .chart-control {
+  display: contents;
+}
+
+.filter-row > .chart-control > span:first-child {
+  font-size: 0.85rem;
+  color: var(--subtext0);
+  text-align: left;
+}
+
+.filter-row > .chart-control > .datefield.p-calendar {
+  width: 100%;
+}
+
+.filter-row > .chart-control > .datefield .p-inputtext {
+  width: 100%;
+  min-width: 0;
 }
 
 .chips {

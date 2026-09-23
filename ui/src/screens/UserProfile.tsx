@@ -97,11 +97,16 @@ export default function UserProfile() {
           onChange={(e) => setPeriod(e.value as Period)}
         />
       </div>
-      <div className="profile-card" style={c?.bannerUrl ? { backgroundImage: `url(${c.bannerUrl})` } : undefined}>
-        {c && (
-          <img className="profile-avatar" src={c.avatarUrl} alt="" width={88} height={88} referrerPolicy="no-referrer" />
-        )}
-        <div className="profile-meta">
+      <div className="profile-card">
+        <div
+          className="profile-banner"
+          style={c?.bannerUrl ? { backgroundImage: `url(${c.bannerUrl})` } : undefined}
+        />
+        <div className="profile-body">
+          {c && (
+            <img className="profile-avatar" src={c.avatarUrl} alt="" width={88} height={88} referrerPolicy="no-referrer" />
+          )}
+          <div className="profile-meta">
           <h2 style={c?.accentColor ? { color: accentHex(c.accentColor) ?? undefined } : undefined}>{displayName}</h2>
           <p className="muted tiny">
             {c?.source === "discord" && c.username ? (
@@ -136,6 +141,7 @@ export default function UserProfile() {
               ))}
             </div>
           )}
+          </div>
         </div>
       </div>
       <Section title="Активность">

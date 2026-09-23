@@ -523,28 +523,36 @@ pre.inline {
   text-decoration: underline;
 }
 
-/* шапка профиля: банер фоном, аватар сверху, ники справа */
+/* шапка профиля: банер отдельной полосой, инфо — под ним */
 .profile-card {
-  display: flex;
-  gap: 1rem;
-  align-items: flex-end;
-  padding: 1rem;
   margin-bottom: 1rem;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background-color: var(--surface2);
+  background: var(--surface2);
+  overflow: hidden;
+}
+.profile-banner {
+  height: 96px;
+  background-color: var(--surface0);
   background-size: cover;
   background-position: center;
-  min-height: 110px;
+}
+.profile-body {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 0 1rem 1rem;
 }
 .profile-card .profile-avatar {
   border-radius: 50%;
   border: 3px solid var(--bg);
   background: var(--bg);
   flex: none;
+  margin-top: -44px;
 }
 .profile-meta {
   min-width: 0;
+  padding-top: 8px;
 }
 .profile-meta h2 {
   margin: 0 0 2px;

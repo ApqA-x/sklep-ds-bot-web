@@ -108,24 +108,6 @@ export default function UserProfile() {
           )}
           <div className="profile-meta">
           <h2 style={c?.accentColor ? { color: accentHex(c.accentColor) ?? undefined } : undefined}>{displayName}</h2>
-          <p className="muted tiny">
-            {c?.source === "discord" && c.username ? (
-              <>
-                @{c.username}
-                {c.globalName && c.globalName !== displayName ? <> · {c.globalName}</> : null}
-                {c.joinedAt ? <> · на сервере с {fmtDate(c.joinedAt)}</> : null}
-              </>
-            ) : (
-              "данные Discord о профиле недоступны"
-            )}
-          </p>
-          <p className="muted">
-            <a href={discordUserUrl(p.userId)} target="_blank" rel="noreferrer">
-              {p.userId}
-            </a>{" "}
-            · заходов за период: {p.appearances} · время: {fmtDuration(p.totalMs)} · сообщений:{" "}
-            {p.messageCount.toLocaleString("ru-RU")} · пригласил: {p.invitedCount}
-          </p>
           {(c?.avatars.length ?? 0) > 0 && (
             <div className="avatar-history" title="История аватарок (копится с момента запуска фичи)">
               {c!.avatars.map((a) => (
@@ -144,6 +126,26 @@ export default function UserProfile() {
           </div>
         </div>
       </div>
+      <Section title="Информация">
+        <p className="muted">
+          {c?.source === "discord" && c.username ? (
+            <>
+              @{c.username}
+              {c.globalName && c.globalName !== displayName ? <> · {c.globalName}</> : null}
+              {c.joinedAt ? <> · на сервере с {fmtDate(c.joinedAt)}</> : null}
+            </>
+          ) : (
+            "данные Discord о профиле недоступны"
+          )}
+        </p>
+        <p className="muted">
+          <a href={discordUserUrl(p.userId)} target="_blank" rel="noreferrer">
+            {p.userId}
+          </a>{" "}
+          · заходов за период: {p.appearances} · время: {fmtDuration(p.totalMs)} · сообщений:{" "}
+          {p.messageCount.toLocaleString("ru-RU")} · пригласил: {p.invitedCount}
+        </p>
+      </Section>
       <Section title="Активность">
         <div className="toolbar">
           <SelectButton

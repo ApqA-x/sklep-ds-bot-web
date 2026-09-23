@@ -324,7 +324,7 @@ export default function Settings() {
   const eventTypes = asStringArray(form.activityEventTypes);
   const textChannels = picker.data?.textChannels ?? [];
   const voiceChannels = picker.data?.voiceChannels ?? [];
-  const roleOptions = (picker.data?.roles ?? []).filter((r) => r.assignable);
+  const allRoles = picker.data?.roles ?? [];
   const categoryChannels = asRecord(form.activityCategoryChannelIds);
   const commandAccess = asRecord(form.commandAccess);
   const setCategoryChannel = (category: string, channelId: string) => {
@@ -500,17 +500,23 @@ export default function Settings() {
         </label>
         <label className="field">
           <span>Autorole</span>
-          {roleOptions.length > 0 ? (
+          {(picker.data?.roles?.length ?? 0) > 0 ? (
             <Dropdown
               value={String(form.autoRoleId ?? "")}
               options={[
-                { value: "", label: "— не задана —" },
-                ...(form.autoRoleId && !roleOptions.some((r) => r.id === String(form.autoRoleId))
-                  ? [{ value: String(form.autoRoleId), label: `${form.autoRoleId} (нет в списке)` }]
+                { value: "", label: "— не задана —", disabled: false },
+                ...(form.autoRoleId && !allRoles.some((r) => r.id === String(form.autoRoleId))
+                  ? [{ value: String(form.autoRoleId), label: `${form.autoRoleId} (нет в списке)`, disabled: false }]
                   : []),
-                ...roleOptions.map((r) => ({ value: r.id, label: r.name })),
+                ...allRoles.map((r) => ({
+                  value: r.id,
+                  label: r.assignable ? r.name : `${r.name} — выше роли бота`,
+                  disabled: !r.assignable,
+                })),
               ]}
+              optionLabel="label"
               optionValue="value"
+              optionDisabled="disabled"
               disabled={!canWrite}
               onChange={(e) => set("autoRoleId", e.value as string)}
             />
@@ -521,11 +527,11 @@ export default function Settings() {
               onChange={(e) => set("autoRoleId", e.target.value)}
             />
           )}
-          <NameHint kind="role" value={form.autoRoleId} />
-          <span className="muted tiny">
-            Роль, которую бот выдаёт новичку при входе по чужому приглашению (автороль за реферал).
-          </span>
         </label>
+        <p className="muted tiny">
+          Роль, которую бот выдаёт новичку при входе по чужому приглашению (автороль за реферал).{" "}
+          {!canWrite && "Просмотр: для редактирования нужен ADMINISTRATOR."}
+        </p>
       </Section>
       <Section title="Списки">
         <IdList

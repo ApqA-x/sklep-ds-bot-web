@@ -485,6 +485,20 @@ pre.inline {
   width: 100%;
 }
 
+/* Подписи recharts (часы/сообщения/инвайты по осям): дефолтный серый #666
+   почти не читается на тёмной теме — поднимаем контраст и вес */
+.chart .recharts-cartesian-axis-tick-value,
+.chart .recharts-cartesian-axis-tick text,
+.chart .recharts-label {
+  fill: var(--text);
+  font-weight: 600;
+}
+
+.chart .recharts-cartesian-axis-line,
+.chart .recharts-cartesian-axis-tick-line {
+  stroke: var(--surface2);
+}
+
 .home h1 {
   margin-bottom: 0.3rem;
   color: var(--mauve);

@@ -17,7 +17,7 @@ from .queries import ensure_web_indexes
 API_DIR = Path(__file__).resolve().parent
 UI_DIST = (API_DIR.parent / "ui" / "dist").resolve()
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 
 def _clean(value: str | None) -> str:

@@ -974,7 +974,7 @@ export default function Chat() {
       {canWrite && (
         <div className="toolbar">
           <Button
-            className={showSend ? "chip active" : "chip"}
+            className={showSend ? "chip active send-open" : "chip send-open"}
             icon="pi pi-send"
             onClick={() => setShowSend((v) => !v)}
           >

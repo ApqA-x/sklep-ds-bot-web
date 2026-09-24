@@ -1623,6 +1623,22 @@ button.danger:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--pink) 78%, black);
 }
 
+/* чат: кнопка открытия панели отправки — розовая, как кнопки внутри панели */
+.p-button.chip.send-open,
+.p-button.chip.send-open.active {
+  background: var(--pink);
+  border-color: var(--pink);
+  color: var(--crust);
+  font-weight: 600;
+}
+
+.p-button.chip.send-open:enabled:hover,
+.p-button.chip.send-open.active:enabled:hover {
+  background: color-mix(in srgb, var(--pink) 78%, black);
+  border-color: color-mix(in srgb, var(--pink) 78%, black);
+  color: var(--crust);
+}
+
 /* крестик удаления внутри чипа */
 .p-button.chip-x,
 .chip .p-button.chip-x {

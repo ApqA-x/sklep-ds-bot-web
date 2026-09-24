@@ -7,7 +7,6 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 
 from . import read as read_api
@@ -144,6 +143,7 @@ def create_app(
 
     from . import auth as auth_api
     from . import bot as bot_api
+    from . import media as media_api
     from . import write as write_api
 
     app.include_router(auth_api.router)
@@ -151,15 +151,10 @@ def create_app(
     app.include_router(read_api.router)
     app.include_router(write_api.router)
     app.include_router(bot_api.router)
-
-    # Раздача сохранённых вложений (картинки, скачанные ботом в общий volume).
-    # Пути содержат sha256 содержимого — наружу не угадать; доступ без сессии
-    # осознанно: это те же картинки, что лежали открытыми на CDN Discord.
-    media_dir = _clean(cfg.media_dir)
-    if media_dir:
-        media_root = Path(media_dir)
-        media_root.mkdir(parents=True, exist_ok=True)
-        app.mount("/media", StaticFiles(directory=str(media_root)), name="media")
+    # T05: вместо публичного StaticFiles — авторизованная выдача вложений
+    # (доказательство связи файла с гильдией через метаданные чата).
+    app.include_router(media_api.guild_router)
+    app.include_router(media_api.router)
 
     # SPA catch-all: serve built ui/dist assets, fall back to index.html for client routes.
     # Хэшированные ассеты (assets/index-<hash>.js) можно кэшировать навечно, а index.html

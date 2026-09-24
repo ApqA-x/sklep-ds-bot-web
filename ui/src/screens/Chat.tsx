@@ -26,13 +26,15 @@ const TYPE_FILTERS: { key: string; label: string }[] = [
 
 const TYPE_LABELS: Record<string, string> = Object.fromEntries(TYPE_FILTERS.map((t) => [t.key, t.label]));
 
-function attachmentUrl(a: ChatAttachment): string {
+function attachmentUrl(guildId: string, a: ChatAttachment): string {
+  // T05: авторизованная выдача; старый /media/<path> тоже работает, но с той же проверкой
+  if (a.stored && a.id) return `/api/guild/${guildId}/media/attachment/${a.id}`;
   if (a.stored && a.path) return `/media/${a.path}`;
   return a.url; // запасная ссылка Discord (протухает)
 }
 
-function Attachment({ a }: { a: ChatAttachment }) {
-  const href = attachmentUrl(a);
+function Attachment({ guildId, a }: { guildId: string; a: ChatAttachment }) {
+  const href = attachmentUrl(guildId, a);
   if (!href) return null;
   if (a.kind === "image") {
     return (
@@ -1131,7 +1133,7 @@ export default function Chat() {
                     {m.attachments?.length > 0 && (
                       <span className="chat-attachments">
                         {m.attachments.map((a) => (
-                          <Attachment key={a.id || a.filename} a={a} />
+                          <Attachment key={a.id || a.filename} guildId={guildId} a={a} />
                         ))}
                       </span>
                     )}

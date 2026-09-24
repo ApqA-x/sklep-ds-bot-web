@@ -17,6 +17,9 @@ from pymongo import MongoClient  # noqa: E402
 
 from api import mutations, queries  # noqa: E402
 from api.models import GuildSettingsPatch, ListMemberAction  # noqa: E402
+from stand_guard import guard_db_name, guard_mongo_uri  # noqa: E402
+
+pytestmark = pytest.mark.integration
 
 URI = os.environ.get("TEST_MONGO_URI", "mongodb://127.0.0.1:27099")
 GUILD = "170000000000000000"
@@ -35,13 +38,14 @@ def _server_up() -> bool:
 
 @pytest.fixture()
 def db():
+    # guard: fail-closed на прод-ресурсы (порт/имя БД), до первого обращения к сети
+    guard_mongo_uri(URI)
     if not _server_up():
         pytest.skip(f"test mongo not reachable at {URI}")
     client = MongoClient(URI, serverSelectionTimeoutMS=3000)
     name = f"voice_tracker_t06_test_{uuid.uuid4().hex[:8]}"
+    guard_db_name(name)
     database = client[name]
-    # guard: тестовая БД обязана быть изолированной и пустой
-    assert name.startswith("voice_tracker_t06_test_")
     yield database
     client.drop_database(name)
     client.close()

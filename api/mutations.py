@@ -5,6 +5,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from pymongo.errors import DuplicateKeyError
+
 from . import queries
 from .models import ChatPresetAction, GuildSettingsPatch, ListMemberAction, StalkerAction
 
@@ -53,42 +55,48 @@ def record_audit(
     )
 
 
-def _parse_iso(value: str) -> datetime | None:
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
-
-
 def patch_guild_settings(
     db: Any,
     guild_id: str,
     patch: GuildSettingsPatch,
     actor: dict[str, str],
 ) -> tuple[str, dict[str, Any] | None]:
-    """Returns (status, fresh document). status: updated | conflict."""
+    """Returns (status, fresh document). status: updated | conflict.
+
+    T06: одна атомарная CAS-запись с фильтром {_id, revision: expected} и $inc
+    revision. Ноль совпадений — конфликт, а не безусловная запись поверх.
+    Создание отсутствующего документа — отдельный путь с уникальным _id;
+    конкурентный duplicate превращается в конфликт.
+    """
     fields = patch.mongo_set()
-    doc = db[queries.COLL_GUILD_SETTINGS].find_one({"_id": guild_id}) or {}
-
-    if patch.expectedUpdatedAt is not None:
-        current = doc.get("updatedAt")
-        expected = _parse_iso(patch.expectedUpdatedAt)
-        if current is not None and expected is not None:
-            current_dt = current if current.tzinfo else current.replace(tzinfo=timezone.utc)
-            if abs((current_dt - expected).total_seconds()) > 1:
-                return "conflict", queries.settings_document(db, guild_id)
-
+    expected = patch.expectedRevision
+    coll = db[queries.COLL_GUILD_SETTINGS]
+    doc = coll.find_one({"_id": guild_id}) or {}
     now = _utc_now()
     before = {key: doc.get(key) for key in fields}
     if not doc:
-        db[queries.COLL_GUILD_SETTINGS].update_one(
-            {"_id": guild_id},
-            {"$set": {**fields, "updatedAt": now}, "$setOnInsert": {"createdAt": now}},
-            upsert=True,
-        )
+        if expected != 0:
+            # клиент читалrevision N, документа нет — это конфликт, не тихое создание
+            return "conflict", queries.settings_document(db, guild_id)
+        try:
+            coll.update_one(
+                {"_id": guild_id, "revision": {"$exists": False}},
+                {
+                    "$set": {**fields, "updatedAt": now},
+                    "$inc": {"revision": 1},
+                    "$setOnInsert": {"createdAt": now},
+                },
+                upsert=True,
+            )
+        except DuplicateKeyError:
+            return "conflict", queries.settings_document(db, guild_id)
     else:
-        db[queries.COLL_GUILD_SETTINGS].update_one({"_id": guild_id}, {"$set": {**fields, "updatedAt": now}})
+        result = coll.update_one(
+            {"_id": guild_id, "revision": expected},
+            {"$set": {**fields, "updatedAt": now}, "$inc": {"revision": 1}},
+        )
+        if result.matched_count == 0:
+            return "conflict", queries.settings_document(db, guild_id)
 
     record_audit(
         db,
@@ -111,7 +119,12 @@ def mutate_id_list(
     body: ListMemberAction,
     actor: dict[str, str],
 ) -> dict[str, Any] | None:
-    """Atomic $addToSet/$pull of one snowflake in a guild_settings id list."""
+    """Atomic $addToSet/$pull of one snowflake in a guild_settings id list.
+
+    Т06.5: контракт операции — намерение над одним элементом, старая revision не
+    требуется; счётчик revision увеличивается атомарно с самим изменением, чтобы
+    полный patch на устаревшем снимке списка дал конфликт, а не затирание.
+    """
     user_id = body.userId
     operator = "$addToSet" if body.action == "add" else "$pull"
     now = _utc_now()
@@ -119,7 +132,12 @@ def mutate_id_list(
     before_ids = list(doc.get(field) or [])
     db[queries.COLL_GUILD_SETTINGS].update_one(
         {"_id": guild_id},
-        {operator: {field: user_id}, "$set": {"updatedAt": now}, "$setOnInsert": {"createdAt": now}},
+        {
+            operator: {field: user_id},
+            "$set": {"updatedAt": now},
+            "$inc": {"revision": 1},
+            "$setOnInsert": {"createdAt": now},
+        },
         upsert=True,
     )
     fresh = db[queries.COLL_GUILD_SETTINGS].find_one({"_id": guild_id}) or {}

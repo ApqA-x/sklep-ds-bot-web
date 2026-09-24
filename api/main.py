@@ -79,6 +79,14 @@ def create_app(
                 log.info("web indexes: %s", ensure_web_indexes(database))
             except Exception:
                 log.warning("web index creation failed", exc_info=True)
+            try:
+                from .queries import migrate_settings_revision
+
+                migrated = migrate_settings_revision(database)
+                if migrated:
+                    log.info("guild_settings revision backfill: %s docs", migrated)
+            except Exception:
+                log.warning("guild_settings revision backfill failed", exc_info=True)
         sync_task: asyncio.Task | None = None
         if database is not None and cfg.discord_token:
             from . import audit_sync

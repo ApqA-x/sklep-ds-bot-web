@@ -550,7 +550,21 @@ def settings_document(db: Any, guild_id: str) -> dict | None:
         return None
     result = {key: _iso(value) for key, value in doc.items() if key != "_id"}
     result["guildId"] = str(doc["_id"])
+    # T06:Revision всегда в контракте; legacy-документ без поля читается как 0
+    result.setdefault("revision", 0)
     return result
+
+
+def migrate_settings_revision(db: Any) -> int:
+    """T06.4: идемпотентный backfill revision=0 для старых документов.
+
+    Не трогает документы, где revision уже есть (CAS-писатели её увеличивают),
+    и не удаляет неизвестные поля. Возвращает число исправленных документов.
+    """
+    result = db[COLL_GUILD_SETTINGS].update_many(
+        {"revision": {"$exists": False}}, {"$set": {"revision": 0}}
+    )
+    return int(getattr(result, "modified_count", 0))
 
 
 def stalker_subscriptions(db: Any, guild_id: str) -> list[dict]:

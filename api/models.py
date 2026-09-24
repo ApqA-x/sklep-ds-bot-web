@@ -4,7 +4,7 @@ import re
 from typing import Literal
 from urllib.parse import quote
 
-from pydantic import BaseModel, ConfigDict, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 SNOWFLAKE_RE = re.compile(r"^\d{5,25}$")
 
@@ -72,7 +72,8 @@ class GuildSettingsPatch(BaseModel):
     # тип события -> цвет полоски карточки (RGB int); отсутствие ключа = дефолт бота
     activityEventColors: dict[str, int] | None = None
     commandAccess: dict[str, str] | None = None
-    expectedUpdatedAt: str | None = None
+    # T06: CAS-жетон вместо timestamp с допуском. Обязателен: без него — 422 (S04).
+    expectedRevision: int = Field(ge=0)
 
     @field_validator("trackingMode")
     @classmethod
@@ -142,7 +143,7 @@ class GuildSettingsPatch(BaseModel):
     def mongo_set(self) -> dict[str, object]:
         """Patch fields (without conflict token) keyed as in Mongo documents."""
         data = self.model_dump(exclude_unset=True, exclude_none=True)
-        data.pop("expectedUpdatedAt", None)
+        data.pop("expectedRevision", None)
         return data
 
 

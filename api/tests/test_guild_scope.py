@@ -142,9 +142,9 @@ def test_g03_foreign_invite_delete_denied(scope: dict) -> None:
 
 # G04: чужие resource ID в настройках отвергаются сервером и не сохраняются.
 def test_g04_settings_reject_foreign_ids(scope: dict) -> None:
-    response = scope["client"].patch(f"/api/guild/{A}/settings", json={"summaryChannelId": B_TEXT})
+    response = scope["client"].patch(f"/api/guild/{A}/settings", json={"summaryChannelId": B_TEXT, "expectedRevision": 0})
     assert response.status_code == 403
-    response = scope["client"].patch(f"/api/guild/{A}/settings", json={"autoRoleId": B_ROLE})
+    response = scope["client"].patch(f"/api/guild/{A}/settings", json={"autoRoleId": B_ROLE, "expectedRevision": 0})
     assert response.status_code == 403
     settings_calls = [c for c in scope["calls"]["mutation"]]
     assert settings_calls == []  # мутаций Discord не было

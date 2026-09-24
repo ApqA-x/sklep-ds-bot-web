@@ -155,6 +155,8 @@ class FakeCollection:
     def _apply_update(self, doc: dict, update: dict, *, inserted: bool) -> None:
         for key, value in (update.get("$set") or {}).items():
             doc[key] = value
+        for key, value in (update.get("$inc") or {}).items():
+            doc[key] = int(doc.get(key) or 0) + value
         if inserted:
             for key, value in (update.get("$setOnInsert") or {}).items():
                 doc.setdefault(key, value)
@@ -181,6 +183,15 @@ class FakeCollection:
             self.docs.append(new_doc)
             return FakeUpdateResult(0, 0, upserted_id=new_doc["_id"])
         return FakeUpdateResult(0, 0)
+
+    def update_many(self, flt: dict, update: dict, **kw):
+        self.calls.append(("update_many", self.name, flt, update))
+        modified = 0
+        for doc in self.docs:
+            if _matches(doc, flt):
+                self._apply_update(doc, update, inserted=False)
+                modified += 1
+        return FakeUpdateResult(modified, modified)
 
     def insert_one(self, doc: dict, **kw):
         self.calls.append(("insert_one", self.name, doc))

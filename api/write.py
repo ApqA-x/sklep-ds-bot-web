@@ -62,7 +62,12 @@ async def patch_settings(request: Request, guildId: str, body: GuildSettingsPatc
         await _check_role(request, guild, body.autoRoleId)
     status, doc = mutations.patch_guild_settings(_db(request), guild, body, actor_of(request))
     if status == "conflict":
-        raise HTTPException(status_code=409, detail="settings changed since you loaded them")
+        # T06.8: 409 с безопасными данными новой версии; клиент сам решает,
+        # какие поля применить к свежей revision (автоматического overwrite нет)
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "revision_conflict", "current": doc or {}},
+        )
     return doc or {}
 
 

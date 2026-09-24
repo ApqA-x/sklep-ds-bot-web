@@ -628,16 +628,21 @@ def known_user_colors(db: Any, guild_id: str, role_meta: dict[str, tuple[int, in
 
 def chat_presets(db: Any, guild_id: str) -> list[dict[str, Any]]:
     docs = db[COLL_CHAT_PRESETS].find({"guildId": guild_id}, sort=[("createdAt", 1)])
-    return [
-        {
+    items = []
+    for doc in docs:
+        item = {
             "id": str(doc.get("_id")),
+            "kind": str(doc.get("kind") or "text"),
             "text": str(doc.get("text") or ""),
             "name": str(doc.get("name") or "").strip() or None,
             "channelIds": [str(c) for c in doc.get("channelIds") or []],
             "createdAt": _iso(doc.get("createdAt")),
         }
-        for doc in docs
-    ]
+        embed = doc.get("embed")
+        if isinstance(embed, dict):
+            item["embed"] = embed
+        items.append(item)
+    return items
 
 
 def chat_channels(db: Any, guild_id: str) -> list[dict[str, Any]]:

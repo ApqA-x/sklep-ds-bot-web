@@ -248,6 +248,91 @@ def test_chat_preset_validation() -> None:
     assert db[queries.COLL_CHAT_PRESETS].docs == []
 
 
+def test_chat_preset_embed_add_list_remove() -> None:
+    db = _settings_db()
+    client = _dev_client(db)
+    channel = "190000000000000000"
+    add = client.post(
+        f"/api/guild/{GUILD}/chat-presets",
+        json={
+            "action": "add",
+            "kind": "embed",
+            "name": "анонс",
+            "channelIds": [channel],
+            "embed": {"title": "  Заголовок  ", "description": "Описание", "color": 0x00FF00},
+        },
+    )
+    assert add.status_code == 200
+    doc = db[queries.COLL_CHAT_PRESETS].docs[0]
+    assert doc["kind"] == "embed"
+    assert "text" not in doc
+    # пустые поля не сохраняются, пробелы в тексте нормализуются
+    assert doc["embed"] == {"title": "Заголовок", "description": "Описание", "color": 0x00FF00}
+    item = client.get(f"/api/guild/{GUILD}/chat-presets").json()["items"][0]
+    assert item["kind"] == "embed"
+    assert item["embed"] == {"title": "Заголовок", "description": "Описание", "color": 0x00FF00}
+    preset_id = add.json()["presetId"]
+    remove = client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "remove", "presetId": preset_id})
+    assert remove.status_code == 200
+    assert db[queries.COLL_CHAT_PRESETS].docs == []
+
+
+def test_chat_preset_embed_validation() -> None:
+    db = _settings_db()
+    client = _dev_client(db)
+    channel = "190000000000000000"
+    # embed-пресет без блока
+    assert (
+        client.post(
+            f"/api/guild/{GUILD}/chat-presets", json={"action": "add", "kind": "embed", "channelIds": [channel]}
+        ).status_code
+        == 422
+    )
+    # пустой блок
+    assert (
+        client.post(
+            f"/api/guild/{GUILD}/chat-presets",
+            json={"action": "add", "kind": "embed", "channelIds": [channel], "embed": {}},
+        ).status_code
+        == 422
+    )
+    # вложения (имена файлов) в пресет не сохраняются — файл живёт в одном сообщении
+    assert (
+        client.post(
+            f"/api/guild/{GUILD}/chat-presets",
+            json={
+                "action": "add",
+                "kind": "embed",
+                "channelIds": [channel],
+                "embed": {"title": "x", "image": "pic.png"},
+            },
+        ).status_code
+        == 422
+    )
+    # канал обязателен
+    assert (
+        client.post(
+            f"/api/guild/{GUILD}/chat-presets",
+            json={"action": "add", "kind": "embed", "embed": {"title": "x"}},
+        ).status_code
+        == 422
+    )
+    assert db[queries.COLL_CHAT_PRESETS].docs == []
+
+
+def test_chat_preset_legacy_docs_read_as_text_kind() -> None:
+    db = _settings_db()
+    client = _dev_client(db)
+    # документ, записанный до появления kind
+    db[queries.COLL_CHAT_PRESETS].docs.append(
+        {"_id": "old1", "guildId": GUILD, "text": "старый", "name": None, "channelIds": ["190000000000000000"]}
+    )
+    item = client.get(f"/api/guild/{GUILD}/chat-presets").json()["items"][0]
+    assert item["kind"] == "text"
+    assert item["text"] == "старый"
+    assert "embed" not in item
+
+
 def test_chat_preset_remove_scoped_to_guild() -> None:
     db = _settings_db()
     client = _dev_client(db)

@@ -399,8 +399,8 @@ def test_chat_presets_lists_guild_documents_sorted() -> None:
     ])
     items = queries.chat_presets(db, "1")
     assert items == [
-        {"id": "p1", "text": "первый", "name": None, "channelIds": [], "createdAt": "2026-09-01T00:00:00Z"},
-        {"id": "p2", "text": "второй", "name": "B", "channelIds": ["c2"], "createdAt": "2026-09-02T00:00:00Z"},
+        {"id": "p1", "kind": "text", "text": "первый", "name": None, "channelIds": [], "createdAt": "2026-09-01T00:00:00Z"},
+        {"id": "p2", "kind": "text", "text": "второй", "name": "B", "channelIds": ["c2"], "createdAt": "2026-09-02T00:00:00Z"},
     ]
 
 

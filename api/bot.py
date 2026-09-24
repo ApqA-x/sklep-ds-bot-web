@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 import time
 from datetime import datetime, timedelta, timezone
@@ -19,6 +20,7 @@ from .auth import actor_of, perms_for, require_guild_admin
 from .config import WebConfig
 from .models import (
     ChannelMessageAction,
+    EmbedSpec,
     InviteCreateAction,
     KickMemberAction,
     MemberRoleAction,
@@ -181,32 +183,41 @@ async def member_kick(request: Request, guildId: str, userId: str, body: KickMem
 async def channel_message(request: Request, guildId: str, channelId: str) -> dict:
     _snowflake(guildId, "guildId")
     _snowflake(channelId, "channelId")
-    content, files = await _message_body(request)
-    json_body = {"content": content} if content else {}
-    status, payload = await _call(
-        request, "POST", f"/channels/{channelId}/messages", json_body=json_body or None, files=files or None
-    )
+    content, embed, files = await _message_body(request)
+    json_body: dict[str, Any] = {}
+    if content:
+        json_body["content"] = content
+    if embed is not None:
+        try:
+            json_body["embeds"] = [embed.discord_embed({name for name, _, _ in files})]
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
     arguments: dict[str, Any] = {
         "channelId": channelId,
         "length": len(content),
         # полный текст в журнал сайта: Discord ограничивает сообщение 2000 символами
         "content": content or None,
     }
+    if embed is not None:
+        arguments["embed"] = embed.audit_summary()
     if files:
         # в audit — только имена и размеры, не содержимое
         arguments["attachments"] = [{"name": name, "size": len(blob)} for name, blob, _ in files]
+    status, payload = await _call(
+        request, "POST", f"/channels/{channelId}/messages", json_body=json_body or None, files=files or None
+    )
     return _finish(request, "message", arguments, status, payload)
 
 
-async def _message_body(request: Request) -> tuple[str, list[tuple[str, bytes, str]]]:
-    """Разбор тела сообщения: JSON {content}, multipart (content + files[]) или form."""
+async def _message_body(request: Request) -> tuple[str, EmbedSpec | None, list[tuple[str, bytes, str]]]:
+    """Разбор тела: JSON {content, embed}, multipart (content + embed(JSON-строка) + files[]) или form."""
     content_type = request.headers.get("content-type", "")
     if not content_type.startswith(("multipart/form-data", "application/x-www-form-urlencoded")):
         try:
             body = ChannelMessageAction.model_validate(await request.json())
         except (ValidationError, ValueError):
-            raise HTTPException(status_code=422, detail="content must be 1..2000 characters") from None
-        return body.content, []
+            raise HTTPException(status_code=422, detail="content or embed required") from None
+        return body.content or "", body.embed, []
 
     try:
         form = await request.form(max_files=MAX_FILES + 1)
@@ -215,11 +226,19 @@ async def _message_body(request: Request) -> tuple[str, list[tuple[str, bytes, s
     content = str(form.get("content") or "").strip()
     if len(content) > 2000:
         raise HTTPException(status_code=422, detail="content must be at most 2000 characters")
+    embed: EmbedSpec | None = None
+    raw_embed = form.get("embed")
+    if raw_embed:
+        try:
+            parsed = EmbedSpec.model_validate(json.loads(str(raw_embed)))
+        except (ValidationError, ValueError):
+            raise HTTPException(status_code=422, detail="invalid embed field") from None
+        embed = None if parsed.is_empty() else parsed
     uploads = [item for item in form.getlist("files") if isinstance(item, UploadFile)]
     if len(uploads) > MAX_FILES:
         raise HTTPException(status_code=422, detail="too many files")
-    if not content and not uploads:
-        raise HTTPException(status_code=422, detail="content or files required")
+    if not content and not uploads and embed is None:
+        raise HTTPException(status_code=422, detail="content, embed or files required")
     files: list[tuple[str, bytes, str]] = []
     total = 0
     for up in uploads:
@@ -230,7 +249,7 @@ async def _message_body(request: Request) -> tuple[str, list[tuple[str, bytes, s
         if total > MAX_TOTAL_BYTES:
             raise HTTPException(status_code=422, detail=f"total upload exceeds {MAX_TOTAL_BYTES} bytes")
         files.append((up.filename or "file", blob, up.content_type or ""))
-    return content, files
+    return content, embed, files
 
 
 @router.post("/invite")

@@ -171,23 +171,27 @@ _SNOWFLAKE = re.compile(r"^\d{5,25}$")
 def mutate_chat_preset(
     db: Any, guild_id: str, body: ChatPresetAction, actor: dict[str, str]
 ) -> dict[str, Any]:
-    """add записывает текстовый пресет в chat_presets, remove удаляет по id гильдии."""
+    """add записывает текстовый или embed-пресет в chat_presets, remove удаляет по id гильдии."""
     now = _utc_now()
     if body.action == "add":
-        text = (body.text or "").strip()
-        if not 1 <= len(text) <= 2000:
-            raise ValueError("chat preset text must be 1..2000 chars")
         preset_id = uuid.uuid4().hex
-        db[queries.COLL_CHAT_PRESETS].insert_one(
-            {
-                "_id": preset_id,
-                "guildId": guild_id,
-                "text": text,
-                "name": body.name,
-                "channelIds": list(body.channelIds or []),
-                "createdAt": now,
-            }
-        )
+        doc: dict[str, Any] = {
+            "_id": preset_id,
+            "guildId": guild_id,
+            "kind": body.kind,
+            "name": body.name,
+            "channelIds": list(body.channelIds or []),
+            "createdAt": now,
+        }
+        if body.kind == "embed":
+            assert body.embed is not None
+            doc["embed"] = {k: v for k, v in body.embed.model_dump().items() if v is not None}
+        else:
+            text = (body.text or "").strip()
+            if not 1 <= len(text) <= 2000:
+                raise ValueError("chat preset text must be 1..2000 chars")
+            doc["text"] = text
+        db[queries.COLL_CHAT_PRESETS].insert_one(doc)
     else:
         preset_id = (body.presetId or "").strip()
         existing = db[queries.COLL_CHAT_PRESETS].find_one({"_id": preset_id, "guildId": guild_id}) or {}
@@ -199,6 +203,7 @@ def mutate_chat_preset(
         action=f"chatPreset.{body.action}",
         after={
             "presetId": preset_id,
+            "kind": body.kind if body.action == "add" else existing.get("kind", "text"),
             "text": body.text if body.action == "add" else None,
             "name": body.name if body.action == "add" else existing.get("name"),
             "channelIds": body.channelIds if body.action == "add" else existing.get("channelIds"),

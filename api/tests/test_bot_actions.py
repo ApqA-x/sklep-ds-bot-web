@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -414,6 +416,99 @@ def test_message_json_still_works(files_calls: list[dict]) -> None:
     }
     # пустой content по-прежнему 422
     assert client.post(f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message", json={"content": "  "}).status_code == 422
+
+
+def test_message_json_embed(calls: list[dict]) -> None:
+    client = _client()
+    response = client.post(
+        f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message",
+        json={"embed": {"title": "Заголовок", "description": "Описание", "color": 0xFF0000}},
+    )
+    assert response.status_code == 200
+    body = calls[-1]["json"]
+    assert body == {"embeds": [{"title": "Заголовок", "description": "Описание", "color": 0xFF0000}]}
+    audit = client.app.state.db[mutations.COLL_AUDIT].docs[0]
+    assert audit["action"] == "bot.message"
+    assert audit["after"]["embed"] == {"title": "Заголовок", "description": "Описание", "color": 0xFF0000}
+
+
+def test_message_embed_defaults_to_black_and_minimal(calls: list[dict]) -> None:
+    client = _client()
+    response = client.post(
+        f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message", json={"embed": {"title": "только заголовок"}}
+    )
+    assert response.status_code == 200
+    # пустые поля не уходят в Discord, цвет по умолчанию — чёрный
+    assert calls[-1]["json"] == {"embeds": [{"color": 0, "title": "только заголовок"}]}
+
+
+def test_message_embed_with_content_and_author_footer(calls: list[dict]) -> None:
+    client = _client()
+    response = client.post(
+        f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message",
+        json={
+            "content": "подпись",
+            "embed": {"authorName": "Автор", "footerText": "Снизу"},
+        },
+    )
+    assert response.status_code == 200
+    assert calls[-1]["json"] == {
+        "content": "подпись",
+        "embeds": [{"color": 0, "author": {"name": "Автор"}, "footer": {"text": "Снизу"}}],
+    }
+
+
+def test_message_multipart_embed_with_files(files_calls: list[dict]) -> None:
+    client = _client()
+    embed = json.dumps({"title": "блок", "image": "pic.png", "thumbnail": "thumb.png"})
+    response = client.post(
+        f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message",
+        data={"embed": embed},
+        files=[
+            ("files", ("pic.png", b"\x89PNG", "image/png")),
+            ("files", ("thumb.png", b"\x89PNG", "image/png")),
+        ],
+    )
+    assert response.status_code == 200
+    last = files_calls[-1]
+    assert last["json"] == {
+        "embeds": [
+            {
+                "color": 0,
+                "title": "блок",
+                "image": {"url": "attachment://pic.png"},
+                "thumbnail": {"url": "attachment://thumb.png"},
+            }
+        ]
+    }
+    assert [name for name, _, _ in last["files"]] == ["pic.png", "thumb.png"]
+
+
+def test_message_embed_missing_attachment(files_calls: list[dict]) -> None:
+    client = _client()
+    response = client.post(
+        f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message",
+        json={"embed": {"title": "x", "image": "absent.png"}},
+    )
+    assert response.status_code == 422
+    assert not files_calls
+
+
+def test_message_embed_validation(calls: list[dict]) -> None:
+    client = _client()
+    url = f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message"
+    # пустой embed без текста
+    assert client.post(url, json={"embed": {}}).status_code == 422
+    # title > 256
+    assert client.post(url, json={"embed": {"title": "x" * 257}}).status_code == 422
+    # description > 4000
+    assert client.post(url, json={"embed": {"description": "x" * 4001}}).status_code == 422
+    # цвет вне диапазона
+    assert client.post(url, json={"embed": {"title": "x", "color": 0x1000000}}).status_code == 422
+    assert client.post(url, json={"embed": {"title": "x", "color": -1}}).status_code == 422
+    # неизвестное поле
+    assert client.post(url, json={"embed": {"fields": []}}).status_code == 422
+    assert not calls
 
 
 def test_write_router_admin_gate_blocks_reads_too() -> None:

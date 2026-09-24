@@ -30,6 +30,8 @@
   --panel: var(--mantle);
   --border: var(--surface0);
   --accent: var(--mauve);
+  /* акцент при наведении — розовый, используется во всех :hover-правилах */
+  --hover-accent: var(--pink);
 }
 
 * {
@@ -117,7 +119,7 @@ select {
 
 button:hover:not(:disabled) {
   transform: scale(1.045);
-  border-color: var(--surface2);
+  border-color: var(--hover-accent);
   background: color-mix(in srgb, var(--surface0) 72%, black);
 }
 
@@ -157,12 +159,12 @@ button:disabled {
 .chip:hover:not(:disabled) {
   transform: scale(1.06);
   background: color-mix(in srgb, var(--surface0) 72%, black);
-  border-color: var(--surface2);
+  border-color: var(--hover-accent);
 }
 
 .chip.active:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--mauve) 78%, black);
-  border-color: color-mix(in srgb, var(--mauve) 78%, black);
+  background: color-mix(in srgb, var(--pink) 78%, black);
+  border-color: color-mix(in srgb, var(--pink) 78%, black);
   color: var(--crust);
 }
 
@@ -187,7 +189,7 @@ button:disabled {
 .sort-toggle:hover:not(:disabled) {
   transform: scale(1.06);
   background: color-mix(in srgb, var(--surface1) 70%, black);
-  border-color: var(--mauve);
+  border-color: var(--hover-accent);
   color: var(--text);
 }
 
@@ -248,9 +250,9 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  padding: 0.45rem 1rem;
+  padding: 0.45rem 1.15rem;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 999px;
   background: var(--surface1);
   color: var(--subtext1);
   font: inherit;
@@ -260,7 +262,7 @@ button:disabled {
     border-color 0.15s ease;
 }
 .send-tabs .p-tabview-nav-link:hover {
-  border-color: var(--mauve);
+  border-color: var(--hover-accent);
   color: var(--text);
   background: var(--surface2);
 }
@@ -495,7 +497,7 @@ button:disabled {
   transform: none;
   background: color-mix(in srgb, var(--surface0) 72%, black);
   color: var(--text);
-  border-color: var(--surface2);
+  border-color: var(--hover-accent);
 }
 
 .tab.active {
@@ -765,6 +767,7 @@ pre.inline {
   text-decoration: none;
 }
 .userlink:hover {
+  color: var(--hover-accent);
   text-decoration: underline;
 }
 
@@ -816,7 +819,7 @@ pre.inline {
   display: block;
 }
 .avatar-history img:hover {
-  outline: 2px solid var(--mauve);
+  outline: 2px solid var(--hover-accent);
 }
 .discord-details .diff-line {
   display: block;
@@ -891,7 +894,7 @@ pre.inline {
     transform 0.15s ease;
 }
 .user-chip a:hover {
-  color: var(--mauve);
+  color: var(--hover-accent);
   transform: scale(1.06);
   text-decoration: underline;
 }
@@ -1201,6 +1204,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .chat-attachment:hover {
+  color: var(--hover-accent);
   text-decoration: underline;
 }
 
@@ -1317,6 +1321,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .expander:hover {
+  color: var(--hover-accent);
   text-decoration: underline;
 }
 
@@ -1352,8 +1357,8 @@ button.danger:hover:not(:disabled) {
 .online-count:hover:not(:disabled) {
   transform: scale(1.06);
   color: var(--crust);
-  background: color-mix(in srgb, var(--mauve) 78%, black);
-  border-color: color-mix(in srgb, var(--mauve) 78%, black);
+  background: color-mix(in srgb, var(--pink) 78%, black);
+  border-color: color-mix(in srgb, var(--pink) 78%, black);
 }
 
 .online-count.active {
@@ -1362,7 +1367,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .online-count.active:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--mauve) 78%, black);
+  background: color-mix(in srgb, var(--pink) 78%, black);
 }
 
 .online-list {
@@ -1385,7 +1390,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .online-user:hover {
-  color: var(--mauve);
+  color: var(--hover-accent);
 }
 
 .online-sessions {
@@ -1450,6 +1455,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .linklike:hover {
+  color: var(--hover-accent);
   text-decoration: underline;
 }
 
@@ -1521,7 +1527,7 @@ button.danger:hover:not(:disabled) {
 .p-button:enabled:hover {
   transform: scale(1.045);
   background: color-mix(in srgb, var(--surface0) 72%, black);
-  border-color: var(--surface2);
+  border-color: var(--hover-accent);
   color: var(--text);
 }
 
@@ -1553,7 +1559,7 @@ button.danger:hover:not(:disabled) {
 .p-button.chip:enabled:hover {
   transform: scale(1.06);
   background: color-mix(in srgb, var(--surface0) 72%, black);
-  border-color: var(--surface2);
+  border-color: var(--hover-accent);
 }
 
 .p-button.chip.active {
@@ -1563,8 +1569,8 @@ button.danger:hover:not(:disabled) {
 }
 
 .p-button.chip.active:enabled:hover {
-  background: color-mix(in srgb, var(--mauve) 78%, black);
-  border-color: color-mix(in srgb, var(--mauve) 78%, black);
+  background: color-mix(in srgb, var(--pink) 78%, black);
+  border-color: color-mix(in srgb, var(--pink) 78%, black);
   color: var(--crust);
 }
 
@@ -1589,7 +1595,7 @@ button.danger:hover:not(:disabled) {
 .p-selectbutton.chip-group .p-button:enabled:hover {
   transform: scale(1.06);
   background: color-mix(in srgb, var(--surface0) 72%, black);
-  border-color: var(--surface2);
+  border-color: var(--hover-accent);
 }
 
 .p-selectbutton.chip-group .p-button.p-highlight {
@@ -1599,8 +1605,8 @@ button.danger:hover:not(:disabled) {
 }
 
 .p-selectbutton.chip-group .p-button.p-highlight:enabled:hover {
-  background: color-mix(in srgb, var(--mauve) 78%, black);
-  border-color: color-mix(in srgb, var(--mauve) 78%, black);
+  background: color-mix(in srgb, var(--pink) 78%, black);
+  border-color: color-mix(in srgb, var(--pink) 78%, black);
 }
 
 /* крестик удаления внутри чипа */
@@ -1637,7 +1643,7 @@ button.danger:hover:not(:disabled) {
   transform: none;
   background: none;
   border: none;
-  color: var(--lavender);
+  color: var(--hover-accent);
   text-decoration: underline;
 }
 
@@ -1654,7 +1660,7 @@ button.danger:hover:not(:disabled) {
   transform: none;
   background: none;
   border: none;
-  color: var(--lavender);
+  color: var(--hover-accent);
   text-decoration: underline;
 }
 
@@ -1671,8 +1677,8 @@ button.danger:hover:not(:disabled) {
 .p-button.online-count:enabled:hover {
   transform: scale(1.06);
   color: var(--crust);
-  background: color-mix(in srgb, var(--mauve) 78%, black);
-  border-color: color-mix(in srgb, var(--mauve) 78%, black);
+  background: color-mix(in srgb, var(--pink) 78%, black);
+  border-color: color-mix(in srgb, var(--pink) 78%, black);
 }
 
 .p-button.online-count.active {
@@ -1694,7 +1700,7 @@ button.danger:hover:not(:disabled) {
 .p-button.sort-toggle:enabled:hover {
   transform: scale(1.06);
   background: color-mix(in srgb, var(--surface1) 70%, black);
-  border-color: var(--mauve);
+  border-color: var(--hover-accent);
   color: var(--text);
 }
 
@@ -1708,7 +1714,7 @@ button.danger:hover:not(:disabled) {
 }
 
 .p-inputtext:enabled:hover {
-  border-color: var(--surface2);
+  border-color: var(--hover-accent);
 }
 
 .p-inputtext:enabled:focus {
@@ -1727,7 +1733,7 @@ button.danger:hover:not(:disabled) {
 
 .p-dropdown:not(.p-disabled):hover,
 .p-multiselect:not(.p-disabled):hover {
-  border-color: var(--surface2);
+  border-color: var(--hover-accent);
 }
 
 .p-dropdown:not(.p-disabled).p-focus,
@@ -1839,17 +1845,22 @@ button.danger:hover:not(:disabled) {
 }
 
 .p-checkbox:not(.p-checkbox-disabled) .p-checkbox-box:hover {
-  border-color: var(--surface2);
+  border-color: var(--hover-accent);
 }
 
 .p-checkbox:not(.p-checkbox-disabled) .p-checkbox-box.p-focus {
-  border-color: var(--mauve);
+  border-color: var(--hover-accent);
   box-shadow: none;
 }
 
-.p-checkbox .p-checkbox-box.p-highlight {
-  background: var(--mauve);
-  border-color: var(--mauve);
+/* PrimeReact вешает p-highlight на корень .p-checkbox, а не на .p-checkbox-box */
+.p-checkbox.p-highlight .p-checkbox-box {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.p-checkbox.p-highlight .p-checkbox-box .p-checkbox-icon {
+  color: var(--crust);
 }
 
 /* ---- PrimeReact Calendar: поле + кнопка как один контрол ---- */
@@ -1892,9 +1903,9 @@ button.danger:hover:not(:disabled) {
 .datefield .p-datepicker-trigger:enabled:focus {
   transform: none;
   z-index: 1;
-  color: var(--mauve);
+  color: var(--hover-accent);
   background: var(--surface0);
-  border-color: var(--surface2);
+  border-color: var(--hover-accent);
   box-shadow: none;
 }
 
@@ -1930,7 +1941,7 @@ button.danger:hover:not(:disabled) {
 .p-datepicker .p-datepicker-header .p-datepicker-prev:enabled:hover,
 .p-datepicker .p-datepicker-header .p-datepicker-next:enabled:hover {
   background: var(--surface0);
-  color: var(--mauve);
+  color: var(--hover-accent);
 }
 
 .p-datepicker .p-datepicker-header .p-datepicker-prev:focus-visible,
@@ -1954,7 +1965,7 @@ button.danger:hover:not(:disabled) {
 
 .p-datepicker .p-datepicker-header .p-datepicker-title .p-datepicker-year:enabled:hover,
 .p-datepicker .p-datepicker-header .p-datepicker-title .p-datepicker-month:enabled:hover {
-  color: var(--mauve);
+  color: var(--hover-accent);
   background: var(--surface0);
 }
 

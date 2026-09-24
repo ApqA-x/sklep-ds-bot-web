@@ -171,10 +171,81 @@ export function AuditDetails({ item }: { item: AuditItem }) {
             {after.reason ? <> (причина: {String(after.reason)})</> : null}
           </>
         );
-      case "bot.message":
+      case "bot.message": {
+        const attachments = Array.isArray(after.attachments)
+          ? (after.attachments as { name?: string; size?: number }[])
+          : [];
+        const content = typeof after.content === "string" ? after.content : null;
+        const preview = typeof after.preview === "string" ? after.preview : null;
+        return (
+          <details className="intervals">
+            <summary>отправил сообщение</summary>
+            <div className="bot-message-detail">
+              <div>
+                чат: <Channel id={String(after.channelId)} />{" "}
+                <span className="muted tiny">({String(after.channelId)})</span>
+              </div>
+              <div>
+                текст ({String(after.length)} симв.):
+                {content !== null ? (
+                  <pre className="inline">{content}</pre>
+                ) : preview !== null ? (
+                  <pre className="inline">{preview}</pre>
+                ) : (
+                  <span className="muted"> не сохранён (запись до обновления журнала)</span>
+                )}
+              </div>
+              {attachments.length > 0 && (
+                <div>
+                  файлы:{" "}
+                  {attachments.map((a, i) => (
+                    <span key={i}>
+                      {i > 0 && ", "}
+                      {a.name ?? "?"}
+                      {typeof a.size === "number" &&
+                        ` (${a.size >= 1024 ? `${Math.round(a.size / 1024)} КБ` : `${a.size} Б`})`}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+          </details>
+        );
+      }
+      case "chatPreset.add":
         return (
           <>
-            отправил сообщение в <Channel id={String(after.channelId)} /> ({String(after.length)} симв.)
+            сохранил пресет сообщения{after.name ? <> «{String(after.name)}»</> : null}
+            {Array.isArray(after.channelIds) && (after.channelIds as string[]).length > 0 ? (
+              <>
+                {" "}
+                → {(after.channelIds as string[]).map((id, i) => (
+                  <span key={id}>
+                    {i > 0 && ", "}
+                    <Channel id={id} />
+                  </span>
+                ))}
+              </>
+            ) : null}
+            {after.text ? <> : «{String(after.text).slice(0, 80)}{(String(after.text).length > 80 ? "…" : "")}»</> : null}
+          </>
+        );
+      case "chatPreset.remove":
+        return (
+          <>
+            удалил пресет сообщения{after.name ? <> «{String(after.name)}»</> : null}
+            {Array.isArray(after.channelIds) && (after.channelIds as string[]).length > 0 ? (
+              <>
+                {" "}
+                (каналы: {(after.channelIds as string[]).map((id, i) => (
+                  <span key={id}>
+                    {i > 0 && ", "}
+                    <Channel id={id} />
+                  </span>
+                ))}
+                )
+              </>
+            ) : null}
           </>
         );
       case "bot.invite.create":

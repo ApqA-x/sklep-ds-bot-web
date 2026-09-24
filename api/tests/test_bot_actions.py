@@ -367,6 +367,7 @@ def test_message_multipart_with_files(files_calls: list[dict]) -> None:
     assert audit["action"] == "bot.message"
     assert audit["after"]["attachments"] == [{"name": "a.txt", "size": 4}]
     assert audit["after"]["length"] == 5
+    assert audit["after"]["content"] == "hello"  # полный текст сообщения в журнале сайта
 
 
 def test_message_files_only(files_calls: list[dict]) -> None:

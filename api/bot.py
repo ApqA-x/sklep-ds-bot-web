@@ -186,7 +186,12 @@ async def channel_message(request: Request, guildId: str, channelId: str) -> dic
     status, payload = await _call(
         request, "POST", f"/channels/{channelId}/messages", json_body=json_body or None, files=files or None
     )
-    arguments: dict[str, Any] = {"channelId": channelId, "length": len(content)}
+    arguments: dict[str, Any] = {
+        "channelId": channelId,
+        "length": len(content),
+        # полный текст в журнал сайта: Discord ограничивает сообщение 2000 символами
+        "content": content or None,
+    }
     if files:
         # в audit — только имена и размеры, не содержимое
         arguments["attachments"] = [{"name": name, "size": len(blob)} for name, blob, _ in files]

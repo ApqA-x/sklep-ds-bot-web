@@ -491,6 +491,27 @@ pre.inline {
   font-size: 0.9em;
 }
 
+/* подробности об отправленном сообщении в журнале сайта */
+.bot-message-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.2rem 0 0.1rem;
+}
+
+.bot-message-detail pre.inline {
+  display: block;
+  margin: 0.3rem 0 0;
+  font-size: 1.05em;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--crust);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+}
+
 .summary {
   background: var(--crust);
   border-radius: 8px;

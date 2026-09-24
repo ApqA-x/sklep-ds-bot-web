@@ -190,6 +190,7 @@ def mutate_chat_preset(
         )
     else:
         preset_id = (body.presetId or "").strip()
+        existing = db[queries.COLL_CHAT_PRESETS].find_one({"_id": preset_id, "guildId": guild_id}) or {}
         db[queries.COLL_CHAT_PRESETS].delete_one({"_id": preset_id, "guildId": guild_id})
     record_audit(
         db,
@@ -199,8 +200,8 @@ def mutate_chat_preset(
         after={
             "presetId": preset_id,
             "text": body.text if body.action == "add" else None,
-            "name": body.name if body.action == "add" else None,
-            "channelIds": body.channelIds if body.action == "add" else None,
+            "name": body.name if body.action == "add" else existing.get("name"),
+            "channelIds": body.channelIds if body.action == "add" else existing.get("channelIds"),
         },
     )
     return {"ok": True, "presetId": preset_id}

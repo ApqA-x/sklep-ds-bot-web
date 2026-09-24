@@ -206,7 +206,7 @@ button:disabled {
   display: flex;
   flex-direction: column;
   gap: 0.55rem;
-  padding: 0.9rem 1rem;
+  padding: 0.9rem 1rem 1.6rem;
   margin: 0 0 0.9rem;
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -223,6 +223,120 @@ button:disabled {
 .send-panel .p-inputtextarea {
   width: 100%;
   resize: vertical;
+}
+
+/* вкладки «Текст» / «Отправить блок» в панели отправки */
+.send-tabs {
+  margin-bottom: 0.9rem;
+}
+.send-tabs > .p-tabview-panels {
+  padding: 0.6rem 0 0;
+  background: transparent;
+}
+.send-tabs .send-panel {
+  margin-bottom: 0;
+}
+
+/* конструктор embed-блока */
+.embed-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .embed-grid {
+    grid-template-columns: 1fr;
+  }
+}
+.embed-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.embed-field h4 {
+  margin: 0 0 0.25rem;
+  color: var(--subtext1);
+  font-size: 0.85rem;
+}
+.embed-field .p-inputtext,
+.embed-field .p-inputtextarea {
+  width: 100%;
+}
+.embed-file-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.embed-preview-wrap {
+  position: sticky;
+  top: 0.6rem;
+}
+.embed-caption {
+  margin-bottom: 0.5rem;
+  white-space: pre-wrap;
+  color: var(--text);
+}
+.embed-preview-card {
+  background: var(--surface0);
+  border-left: 4px solid var(--mauve);
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  color: var(--text);
+  overflow: hidden;
+}
+.embed-author {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-weight: 600;
+  font-size: 0.85rem;
+  margin-bottom: 0.3rem;
+}
+.embed-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+.embed-title {
+  font-weight: 700;
+  margin-bottom: 0.3rem;
+}
+.embed-body {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+}
+.embed-description {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 0.9rem;
+}
+.embed-thumbnail {
+  max-width: 120px;
+  max-height: 120px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex: none;
+}
+.embed-image {
+  margin-top: 0.5rem;
+  max-width: 100%;
+  max-height: 280px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+.embed-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--subtext0);
 }
 
 /* строка и чипы пресетов сообщений в панели отправки */
@@ -695,8 +809,15 @@ pre.inline {
 .user-chip a {
   color: var(--text);
   font-weight: 600;
+  font-size: 1rem;
+  display: inline-block;
+  transition:
+    color 0.15s ease,
+    transform 0.15s ease;
 }
 .user-chip a:hover {
+  color: var(--mauve);
+  transform: scale(1.06);
   text-decoration: underline;
 }
 

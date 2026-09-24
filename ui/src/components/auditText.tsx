@@ -332,14 +332,45 @@ export function AuditDetails({ item }: { item: AuditItem }) {
           : [];
         const content = typeof after.content === "string" ? after.content : null;
         const preview = typeof after.preview === "string" ? after.preview : null;
+        const embed =
+          after.embed && typeof after.embed === "object" ? (after.embed as Record<string, unknown>) : null;
         return (
           <details className="intervals">
-            <summary>отправил сообщение</summary>
+            <summary>
+              отправил сообщение{embed ? <> + embed-блок{typeof embed.title === "string" && embed.title ? ` «${String(embed.title).slice(0, 60)}»` : null}</> : null}
+            </summary>
             <div className="bot-message-detail">
               <div>
                 чат: <Channel id={String(after.channelId)} />{" "}
                 <span className="muted tiny">({String(after.channelId)})</span>
               </div>
+              {embed && (
+                <div>
+                  блок:{" "}
+                  {typeof embed.title === "string" && `заголовок: ${embed.title}; `}
+                  {typeof embed.description === "string" && `описание: ${embed.description}; `}
+                  {typeof embed.author === "string" && `автор: ${embed.author}; `}
+                  {typeof embed.footer === "string" && `футер: ${embed.footer}; `}
+                  {typeof embed.image === "string" && `картинка: ${embed.image}; `}
+                  {typeof embed.thumbnail === "string" && `миниатюра: ${embed.thumbnail}; `}
+                  {typeof embed.color === "number" && (
+                    <>
+                      цвет:{" "}
+                      <span
+                        style={{
+                          display: "inline-block",
+                          width: "0.8em",
+                          height: "0.8em",
+                          background: `#${(embed.color & 0xffffff).toString(16).padStart(6, "0")}`,
+                          border: "1px solid var(--border)",
+                          borderRadius: 2,
+                          verticalAlign: "middle",
+                        }}
+                      />
+                    </>
+                  )}
+                </div>
+              )}
               <div>
                 текст ({String(after.length)} симв.):
                 {content !== null ? (

@@ -262,11 +262,25 @@ export type NamesPayload = {
   userColors: Record<string, string>;
 };
 
+export type EmbedSpec = {
+  title?: string | null;
+  description?: string | null;
+  color?: number | null;
+  thumbnail?: string | null; // имя файла-вложения из этого же сообщения (attachment://)
+  image?: string | null;
+  authorName?: string | null;
+  authorIcon?: string | null;
+  footerText?: string | null;
+  footerIcon?: string | null;
+};
+
 export type ChatPreset = {
   id: string;
+  kind: "text" | "embed";
   text: string;
   name: string | null;
   channelIds: string[];
+  embed?: EmbedSpec;
   createdAt: string | null;
 };
 

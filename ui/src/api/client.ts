@@ -7,6 +7,7 @@ import type {
   ChatMessagesPage,
   ChatPresetPage,
   DiscordAuditPage,
+  EmbedSpec,
   GuildAccess,
   GuildSettingsDoc,
   Health,
@@ -168,6 +169,15 @@ export const api = {
       channelIds,
     }),
 
+  chatPresetAddEmbed: (guildId: string, embed: EmbedSpec, name: string | null, channelIds: string[]) =>
+    apiSend<{ ok: boolean; presetId: string }>("POST", `/api/guild/${guildId}/chat-presets`, {
+      action: "add",
+      kind: "embed",
+      embed,
+      name,
+      channelIds,
+    }),
+
   chatPresetRemove: (guildId: string, presetId: string) =>
     apiSend<{ ok: boolean; presetId: string }>("POST", `/api/guild/${guildId}/chat-presets`, {
       action: "remove",
@@ -279,11 +289,18 @@ export const api = {
   botKick: (guildId: string, userId: string, reason: string) =>
     apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/member/${userId}/kick`, { reason }),
 
-  botMessage: (guildId: string, channelId: string, content: string, files: File[] = []) => {
-    if (files.length === 0)
+  botMessage: (
+    guildId: string,
+    channelId: string,
+    content: string,
+    files: File[] = [],
+    embed: EmbedSpec | null = null,
+  ) => {
+    if (files.length === 0 && embed === null)
       return apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/channel/${channelId}/message`, { content });
     const form = new FormData();
     if (content) form.append("content", content);
+    if (embed) form.append("embed", JSON.stringify(embed));
     for (const f of files) form.append("files", f, f.name);
     return apiSendForm<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/channel/${channelId}/message`, form);
   },

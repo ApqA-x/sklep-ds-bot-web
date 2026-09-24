@@ -6,8 +6,10 @@ import { MultiSelect } from "primereact/multiselect";
 import { SelectButton } from "primereact/selectbutton";
 import { InputTextarea } from "primereact/inputtextarea";
 import { InputText } from "primereact/inputtext";
+import { TabView, TabPanel } from "primereact/tabview";
+import { ColorPicker } from "primereact/colorpicker";
 import { api, useCanWrite } from "../api/client";
-import type { ChatAttachment, ChatMessage, ChatPreset } from "../api/types";
+import type { ChatAttachment, ChatMessage, ChatPreset, EmbedSpec } from "../api/types";
 import { TargetUserPicker } from "../components/userSearch";
 import { DateField } from "../components/dateField";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
@@ -108,6 +110,7 @@ function BotSendPanel({ guildId }: { guildId: string }) {
   const liveChannels = picker.data?.textChannels ?? [];
   const options = liveChannels.map((c) => ({ label: c.name, value: c.id }));
   const nameOfChannel = (id: string) => liveChannels.find((c) => c.id === id)?.name ?? `#${id}`;
+  const textPresets = (presets.data?.items ?? []).filter((p) => p.kind !== "embed");
 
   const trimmed = text.trim();
   const ready = !sending && (trimmed.length > 0 || files.length > 0) && targets.length > 0;
@@ -243,15 +246,15 @@ function BotSendPanel({ guildId }: { guildId: string }) {
         {trimmed && targets.length === 0 ? (
           <span className="muted tiny">для пресета выбери каналы</span>
         ) : (
-          (presets.data?.items.length ?? 0) > 0 && (
+          textPresets.length > 0 && (
             <span className="muted tiny">клик по пресету — заполнит текст и каналы, отправка кнопкой</span>
           )
         )}
       </div>
       {presetError && <p className="hint danger">{presetError}</p>}
-      {(presets.data?.items.length ?? 0) > 0 && (
+      {textPresets.length > 0 && (
         <div className="preset-list">
-          {presets.data!.items.map((p) => (
+          {textPresets.map((p) => (
             <span
               className={sending ? "chip preset-chip disabled" : "chip preset-chip"}
               key={p.id}
@@ -330,6 +333,498 @@ function BotSendPanel({ guildId }: { guildId: string }) {
         <p className="muted tiny">отправлено; в ленте сообщения появятся через несколько секунд</p>
       )}
     </div>
+  );
+}
+
+type EmbedSlot = "image" | "thumbnail" | "authorIcon" | "footerIcon";
+
+type ImageRef = { file: File; name: string; url: string };
+
+const EMPTY_EMBED_FORM = {
+  caption: "",
+  title: "",
+  description: "",
+  color: "#000000",
+  authorName: "",
+  footerText: "",
+};
+
+const SLOT_LABELS: Record<EmbedSlot, string> = {
+  image: "Image (большая картинка)",
+  thumbnail: "Thumbnail (миниатюра справа)",
+  authorIcon: "Author — иконка",
+  footerIcon: "Footer — иконка",
+};
+
+function uniqueAttachmentName(base: string, taken: Set<string>): string {
+  if (!taken.has(base)) return base;
+  const dot = base.lastIndexOf(".");
+  const stem = dot > 0 ? base.slice(0, dot) : base;
+  const ext = dot > 0 ? base.slice(dot) : "";
+  for (let i = 1; ; i++) {
+    const candidate = `${stem}-${i}${ext}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+function intToHex(value: number): string {
+  return `#${(value & 0xffffff).toString(16).padStart(6, "0")}`;
+}
+
+function EmbedPreview({ form, slots }: { form: typeof EMPTY_EMBED_FORM; slots: Record<EmbedSlot, ImageRef | null> }) {
+  return (
+    <div className="embed-preview-card" style={{ borderLeftColor: form.color || "#000000" }}>
+      {(slots.authorIcon || form.authorName) && (
+        <div className="embed-author">
+          {slots.authorIcon && <img src={slots.authorIcon.url} alt="" className="embed-icon" />}
+          {form.authorName && <span className="embed-author-name">{form.authorName}</span>}
+        </div>
+      )}
+      {form.title && <div className="embed-title">{form.title}</div>}
+      <div className="embed-body">
+        {form.description && <div className="embed-description">{form.description}</div>}
+        {slots.thumbnail && <img src={slots.thumbnail.url} alt="" className="embed-thumbnail" />}
+      </div>
+      {slots.image && <img src={slots.image.url} alt="" className="embed-image" />}
+      {(form.footerText || slots.footerIcon) && (
+        <div className="embed-footer">
+          {slots.footerIcon && <img src={slots.footerIcon.url} alt="" className="embed-icon" />}
+          {form.footerText && <span>{form.footerText}</span>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function EmbedSendPanel({ guildId }: { guildId: string }) {
+  const picker = usePicker(guildId);
+  const queryClient = useQueryClient();
+  const [targets, setTargets] = useState<string[]>([]);
+  const [form, setForm] = useState(EMPTY_EMBED_FORM);
+  const [slots, setSlots] = useState<Record<EmbedSlot, ImageRef | null>>({
+    image: null,
+    thumbnail: null,
+    authorIcon: null,
+    footerIcon: null,
+  });
+  const [embedError, setEmbedError] = useState<string | null>(null);
+  const [presetError, setPresetError] = useState<string | null>(null);
+  const [presetName, setPresetName] = useState("");
+  const [sending, setSending] = useState(false);
+  const [armed, setArmed] = useState(false);
+  const [results, setResults] = useState<SendResult[] | null>(null);
+  const fileInputs = useRef<Record<EmbedSlot, HTMLInputElement | null>>({
+    image: null,
+    thumbnail: null,
+    authorIcon: null,
+    footerIcon: null,
+  });
+  const slotsRef = useRef(slots);
+  slotsRef.current = slots;
+  useEffect(
+    () => () => {
+      Object.values(slotsRef.current).forEach((ref) => ref && URL.revokeObjectURL(ref.url));
+    },
+    [],
+  );
+
+  const presets = useQuery({
+    queryKey: ["chat-presets", guildId],
+    queryFn: () => api.chatPresets(guildId),
+  });
+
+  const liveChannels = picker.data?.textChannels ?? [];
+  const options = liveChannels.map((c) => ({ label: c.name, value: c.id }));
+  const nameOfChannel = (id: string) => liveChannels.find((c) => c.id === id)?.name ?? `#${id}`;
+  const embedPresets = (presets.data?.items ?? []).filter((p) => p.kind === "embed");
+
+  const set = (patch: Partial<typeof EMPTY_EMBED_FORM>) => {
+    setForm((f) => ({ ...f, ...patch }));
+    setArmed(false);
+  };
+
+  const hasAnyImage = Object.values(slots).some(Boolean);
+  const hasAnyText = Boolean(
+    form.title.trim() || form.description.trim() || form.authorName.trim() || form.footerText.trim(),
+  );
+  const hasContent = hasAnyImage || hasAnyText;
+  const ready = !sending && hasContent && targets.length > 0;
+  const needsConfirm = targets.length > 1;
+
+  const attachFile = (slot: EmbedSlot, incoming: File | null) => {
+    if (!incoming) return;
+    if (!incoming.type.startsWith("image/")) {
+      setEmbedError("в блок можно приложить только картинки");
+      return;
+    }
+    if (incoming.size > ATTACH_MAX_FILE_BYTES) {
+      setEmbedError(`файл «${incoming.name}» больше ${fmtBytes(ATTACH_MAX_FILE_BYTES)}`);
+      return;
+    }
+    setEmbedError(null);
+    const taken = new Set(
+      Object.entries(slotsRef.current)
+        .filter(([s]) => s !== slot)
+        .map(([, ref]) => ref?.name)
+        .filter((n): n is string => Boolean(n)),
+    );
+    const name = uniqueAttachmentName(incoming.name, taken);
+    setSlots((prev) => {
+      const old = prev[slot];
+      if (old) URL.revokeObjectURL(old.url);
+      return { ...prev, [slot]: { file: incoming, name, url: URL.createObjectURL(incoming) } };
+    });
+    setArmed(false);
+  };
+
+  const detachSlot = (slot: EmbedSlot) => {
+    setSlots((prev) => {
+      const old = prev[slot];
+      if (old) URL.revokeObjectURL(old.url);
+      return { ...prev, [slot]: null };
+    });
+    setArmed(false);
+  };
+
+  const specFor = (withFiles: boolean): EmbedSpec => {
+    const color = parseInt(form.color.slice(1), 16) || null;
+    const spec: EmbedSpec = {
+      title: form.title.trim() || null,
+      description: form.description.trim() || null,
+      color,
+      authorName: form.authorName.trim() || null,
+      footerText: form.footerText.trim() || null,
+    };
+    if (withFiles) {
+      spec.image = slots.image?.name ?? null;
+      spec.thumbnail = slots.thumbnail?.name ?? null;
+      spec.authorIcon = slots.authorIcon?.name ?? null;
+      spec.footerIcon = slots.footerIcon?.name ?? null;
+    }
+    return spec;
+  };
+
+  const send = async () => {
+    if (!ready) return;
+    if (needsConfirm && !armed) {
+      setArmed(true);
+      return;
+    }
+    setArmed(false);
+    setSending(true);
+    setResults([]);
+    const spec = specFor(true);
+    const files = Object.values(slots)
+      .filter((r): r is ImageRef => r !== null)
+      .map((r) => (r.file.name === r.name ? r.file : new File([r.file], r.name, { type: r.file.type })));
+    const caption = form.caption.trim();
+    const out: SendResult[] = [];
+    for (const channelId of targets) {
+      try {
+        await api.botMessage(guildId, channelId, caption, files, spec);
+        out.push({ channelId, ok: true });
+      } catch (err) {
+        out.push({ channelId, ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+      setResults([...out]);
+      await new Promise((r) => setTimeout(r, SEND_PAUSE_MS));
+    }
+    setSending(false);
+  };
+
+  const applyPreset = (preset: ChatPreset) => {
+    setPresetError(null);
+    const e = preset.embed ?? {};
+    setForm({
+      caption: "",
+      title: e.title ?? "",
+      description: e.description ?? "",
+      color: typeof e.color === "number" ? intToHex(e.color) : "#000000",
+      authorName: e.authorName ?? "",
+      footerText: e.footerText ?? "",
+    });
+    setTargets(preset.channelIds);
+    setArmed(false);
+  };
+
+  const savePreset = async () => {
+    if (!hasAnyText || targets.length === 0) return;
+    try {
+      setPresetError(null);
+      await api.chatPresetAddEmbed(guildId, specFor(false), presetName.trim() || null, targets);
+      setPresetName("");
+      await queryClient.invalidateQueries({ queryKey: ["chat-presets", guildId] });
+    } catch (err) {
+      setPresetError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const removePreset = async (presetId: string) => {
+    try {
+      setPresetError(null);
+      await api.chatPresetRemove(guildId, presetId);
+      await queryClient.invalidateQueries({ queryKey: ["chat-presets", guildId] });
+    } catch (err) {
+      setPresetError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  return (
+    <div className="send-panel">
+      <div className="send-row">
+        <MultiSelect
+          className="send-targets"
+          value={targets}
+          options={options}
+          optionLabel="label"
+          optionValue="value"
+          onChange={(e) => {
+            setTargets((e.value as string[]) ?? []);
+            setArmed(false);
+          }}
+          placeholder="каналы для отправки"
+          selectedItemsLabel="выбрано: {0}"
+          maxSelectedLabels={2}
+          display="chip"
+          filter
+          disabled={sending}
+        />
+        <span className="muted tiny">живые текстовые каналы сервера</span>
+      </div>
+      <div className="embed-grid">
+        <div className="embed-fields">
+          <div className="embed-field">
+            <h4>Title</h4>
+            <InputText
+              value={form.title}
+              maxLength={256}
+              placeholder="заголовок блока"
+              disabled={sending}
+              onChange={(e) => set({ title: String(e.target.value ?? "") })}
+            />
+          </div>
+          <div className="embed-field">
+            <h4>Description</h4>
+            <InputTextarea
+              rows={4}
+              value={form.description}
+              maxLength={4000}
+              placeholder="описание"
+              disabled={sending}
+              onChange={(e) => set({ description: String(e.target.value ?? "") })}
+            />
+          </div>
+          <div className="embed-field">
+            <h4>Color</h4>
+            <div className="embed-file-row">
+              <ColorPicker
+                value={form.color}
+                format="hex"
+                disabled={sending}
+                onChange={(e) => set({ color: String(e.value ?? "#000000") })}
+              />
+              <span className="muted tiny">{form.color.toUpperCase()} (по умолчанию чёрный)</span>
+            </div>
+          </div>
+          {(["thumbnail", "image"] as EmbedSlot[]).map((slot) => (
+            <div className="embed-field" key={slot}>
+              <h4>{SLOT_LABELS[slot]}</h4>
+              <div className="embed-file-row">
+                <input
+                  ref={(el) => {
+                    fileInputs.current[slot] = el;
+                  }}
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={(e) => {
+                    attachFile(slot, e.target.files?.[0] ?? null);
+                    e.target.value = "";
+                  }}
+                />
+                <Button className="chip" disabled={sending} onClick={() => fileInputs.current[slot]?.click()}>
+                  {slots[slot] ? "заменить файл" : "📎 выбрать картинку"}
+                </Button>
+                {slots[slot] && (
+                  <span className="chip">
+                    {slots[slot]!.name} <span className="muted tiny">({fmtBytes(slots[slot]!.file.size)})</span>
+                    <Button className="chip-x" title="убрать" disabled={sending} onClick={() => detachSlot(slot)}>
+                      ×
+                    </Button>
+                  </span>
+                )}
+              </div>
+            </div>
+          ))}
+          <div className="embed-field">
+            <h4>Author</h4>
+            <div className="embed-file-row">
+              <InputText
+                value={form.authorName}
+                maxLength={256}
+                placeholder="имя автора"
+                disabled={sending}
+                onChange={(e) => set({ authorName: String(e.target.value ?? "") })}
+              />
+              <input
+                ref={(el) => {
+                  fileInputs.current.authorIcon = el;
+                }}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={(e) => {
+                  attachFile("authorIcon", e.target.files?.[0] ?? null);
+                  e.target.value = "";
+                }}
+              />
+              <Button className="chip" disabled={sending} onClick={() => fileInputs.current.authorIcon?.click()}>
+                {slots.authorIcon ? `иконка: ${slots.authorIcon.name}` : "иконка"}
+              </Button>
+              {slots.authorIcon && (
+                <Button className="chip-x" title="убрать иконку" disabled={sending} onClick={() => detachSlot("authorIcon")}>
+                  ×
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="embed-field">
+            <h4>Footer</h4>
+            <div className="embed-file-row">
+              <InputText
+                value={form.footerText}
+                maxLength={2048}
+                placeholder="текст футера"
+                disabled={sending}
+                onChange={(e) => set({ footerText: String(e.target.value ?? "") })}
+              />
+              <input
+                ref={(el) => {
+                  fileInputs.current.footerIcon = el;
+                }}
+                type="file"
+                accept="image/*"
+                hidden
+                onChange={(e) => {
+                  attachFile("footerIcon", e.target.files?.[0] ?? null);
+                  e.target.value = "";
+                }}
+              />
+              <Button className="chip" disabled={sending} onClick={() => fileInputs.current.footerIcon?.click()}>
+                {slots.footerIcon ? `иконка: ${slots.footerIcon.name}` : "иконка"}
+              </Button>
+              {slots.footerIcon && (
+                <Button className="chip-x" title="убрать иконку" disabled={sending} onClick={() => detachSlot("footerIcon")}>
+                  ×
+                </Button>
+              )}
+            </div>
+          </div>
+          <div className="embed-field">
+            <h4>Подпись (необязательно)</h4>
+            <InputTextarea
+              rows={2}
+              value={form.caption}
+              maxLength={MESSAGE_MAX_LEN}
+              placeholder="обычный текст над блоком"
+              disabled={sending}
+              onChange={(e) => set({ caption: String(e.target.value ?? "") })}
+            />
+          </div>
+        </div>
+        <div className="embed-preview-wrap">
+          <h4 className="muted tiny">предпросмотр</h4>
+          {hasContent ? (
+            <>
+              {form.caption.trim() && <div className="embed-caption">{form.caption}</div>}
+              <EmbedPreview form={form} slots={slots} />
+            </>
+          ) : (
+            <p className="muted tiny">заполните поля — блок появится здесь</p>
+          )}
+        </div>
+      </div>
+      {embedError && <p className="hint danger">{embedError}</p>}
+      <div className="preset-row">
+        <InputText
+          value={presetName}
+          maxLength={100}
+          placeholder="название пресета"
+          disabled={sending}
+          onChange={(e) => setPresetName(String(e.target.value ?? ""))}
+        />
+        <Button
+          className="chip"
+          icon="pi pi-bookmark"
+          disabled={!hasAnyText || targets.length === 0 || sending}
+          onClick={() => void savePreset()}
+        >
+          сохранить блок как пресет
+        </Button>
+        <span className="muted tiny">картинки в пресет не сохраняются — после применения приложите их заново</span>
+      </div>
+      {presetError && <p className="hint danger">{presetError}</p>}
+      {embedPresets.length > 0 && (
+        <div className="preset-list">
+          {embedPresets.map((p) => (
+            <span
+              className={sending ? "chip preset-chip disabled" : "chip preset-chip"}
+              key={p.id}
+              title={`${p.embed?.title ?? ""}\n${p.embed?.description ?? ""}\nканалы: ${p.channelIds.map(nameOfChannel).join(", ") || "не сохранены"}`}
+              onClick={() => {
+                if (!sending) applyPreset(p);
+              }}
+            >
+              <span className="preset-label">{p.name ?? p.embed?.title ?? "(без названия)"}</span>
+              <span className="muted tiny">{p.channelIds.map(nameOfChannel).join(" ")}</span>
+              <Button
+                className="chip-x"
+                title="удалить пресет"
+                disabled={sending}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void removePreset(p.id);
+                }}
+              >
+                ×
+              </Button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="send-row">
+        <Button disabled={!ready} loading={sending} onClick={() => void send()}>
+          {sending ? "отправка…" : armed ? `подтвердить отправку (${targets.length} каналов)` : "отправить блок"}
+        </Button>
+        {needsConfirm && !armed && !sending && <span className="muted tiny">отправка попросит подтверждение</span>}
+      </div>
+      {results && results.length > 0 && (
+        <ul className="send-results">
+          {results.map((r) => (
+            <li key={r.channelId} className={r.ok ? "ok" : "fail"}>
+              {r.ok ? "✓" : "✗"} #{nameOfChannel(r.channelId)}
+              {r.error ? ` — ${r.error}` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+      {results && results.length > 0 && results.every((r) => r.ok) && (
+        <p className="muted tiny">отправлено; в ленте сообщения появятся через несколько секунд</p>
+      )}
+    </div>
+  );
+}
+
+function SendTabs({ guildId }: { guildId: string }) {
+  return (
+    <TabView className="send-tabs">
+      <TabPanel header="Текст">
+        <BotSendPanel guildId={guildId} />
+      </TabPanel>
+      <TabPanel header="Отправить блок">
+        <EmbedSendPanel guildId={guildId} />
+      </TabPanel>
+    </TabView>
   );
 }
 
@@ -420,7 +915,7 @@ export default function Chat() {
           </Button>
         </div>
       )}
-      {canWrite && showSend && <BotSendPanel guildId={guildId} />}
+      {canWrite && showSend && <SendTabs guildId={guildId} />}
       {available.length === 0 ? (
         <Empty>
           История сообщений ещё не записывается в базу (коллекция chat_messages пуста). Как только бот начнёт её

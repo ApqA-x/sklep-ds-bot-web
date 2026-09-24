@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
-import { SelectButton } from "primereact/selectbutton";
+import { Link, useNavigate } from "react-router-dom";
 import {
   Bar,
   BarChart,
@@ -17,13 +16,10 @@ import { Empty, ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDate } from "../lib/format";
 import { DName } from "../names";
 
-const PERIODS: Period[] = ["7d", "30d", "all"];
 const TOPS = [5, 10, 20];
 
-export default function Invites() {
-  const { guildId = "" } = useParams();
+export function InvitesBoard({ guildId, period }: { guildId: string; period: Period }) {
   const navigate = useNavigate();
-  const [period, setPeriod] = useState<Period>("30d");
   const [top, setTop] = useState(10);
   const [grid, setGrid] = useGridPref();
   const query = useQuery({
@@ -40,15 +36,6 @@ export default function Invites() {
 
   return (
     <>
-      <div className="toolbar">
-        <SelectButton
-          className="chip-group"
-          value={period}
-          options={PERIODS.map((p) => ({ label: p, value: p }))}
-          optionValue="value"
-          onChange={(e) => setPeriod(e.value as Period)}
-        />
-      </div>
       {chart.length > 0 && (
         <Section title={`Привели участников (топ-${top})`}>
           <ChartControls top={top} setTop={setTop} topOptions={TOPS} grid={grid} setGrid={setGrid} />

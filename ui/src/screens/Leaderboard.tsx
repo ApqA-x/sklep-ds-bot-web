@@ -16,15 +16,54 @@ import type { Period } from "../api/types";
 import { ChartControls, Grid, useGridPref } from "../components/charts";
 import { ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDuration, toHours } from "../lib/format";
+import { ChatBoard } from "./ChatLeaderboard";
+import { InvitesBoard } from "./Invites";
 
 const PERIODS: Period[] = ["7d", "30d", "all"];
 const TOPS = [5, 10, 20, 50];
 const PAGE_SIZE = 50;
 
+type Board = "voice" | "chat" | "invites";
+
+const BOARDS: { key: Board; label: string }[] = [
+  { key: "voice", label: "Войс" },
+  { key: "chat", label: "Топ чата" },
+  { key: "invites", label: "Инвайты" },
+];
+
 export default function Leaderboard() {
   const { guildId = "" } = useParams();
-  const navigate = useNavigate();
+  const [board, setBoard] = useState<Board>("voice");
   const [period, setPeriod] = useState<Period>("30d");
+
+  return (
+    <>
+      <div className="toolbar">
+        <SelectButton
+          className="chip-group"
+          value={board}
+          options={BOARDS}
+          optionValue="key"
+          onChange={(e) => setBoard(e.value as Board)}
+        />
+        <span style={{ flex: 1 }} />
+        <SelectButton
+          className="chip-group"
+          value={period}
+          options={PERIODS.map((p) => ({ label: p, value: p }))}
+          optionValue="value"
+          onChange={(e) => setPeriod(e.value as Period)}
+        />
+      </div>
+      {board === "voice" && <VoiceBoard key={period} guildId={guildId} period={period} />}
+      {board === "chat" && <ChatBoard key={period} guildId={guildId} period={period} />}
+      {board === "invites" && <InvitesBoard key={period} guildId={guildId} period={period} />}
+    </>
+  );
+}
+
+function VoiceBoard({ guildId, period }: { guildId: string; period: Period }) {
+  const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [top, setTop] = useState(10);
   const [grid, setGrid] = useGridPref();
@@ -51,18 +90,6 @@ export default function Leaderboard() {
 
   return (
     <>
-      <div className="toolbar">
-        <SelectButton
-          className="chip-group"
-          value={period}
-          options={PERIODS.map((p) => ({ label: p, value: p }))}
-          optionValue="value"
-          onChange={(e) => {
-            setPeriod(e.value as Period);
-            setPage(1);
-          }}
-        />
-      </div>
       {items.length > 0 && (
         <Section title={`Топ-${top}, часы в голосе (стр. ${page})`}>
           <ChartControls top={top} setTop={setTop} topOptions={TOPS} grid={grid} setGrid={setGrid} />

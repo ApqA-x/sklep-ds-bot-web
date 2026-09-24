@@ -11,12 +11,10 @@ import Layout from "./Layout";
 import { GuildProvider } from "./guild";
 import Home from "./screens/Home";
 import Leaderboard from "./screens/Leaderboard";
-import ChatLeaderboard from "./screens/ChatLeaderboard";
 import Active from "./screens/Active";
 import Sessions from "./screens/Sessions";
 import SessionDetail from "./screens/SessionDetail";
 import UserProfile from "./screens/UserProfile";
-import Invites from "./screens/Invites";
 import Settings from "./screens/Settings";
 import Audit from "./screens/Audit";
 import Chat from "./screens/Chat";
@@ -55,12 +53,12 @@ createRoot(document.getElementById("root")!).render(
               <Route path="/g/:guildId">
                 <Route index element={<Navigate to="leaderboard" replace />} />
                 <Route path="leaderboard" element={<Leaderboard />} />
-                <Route path="chat-leaderboard" element={<ChatLeaderboard />} />
+                <Route path="chat-leaderboard" element={<Navigate to="../leaderboard" replace />} />
                 <Route path="active" element={<Active />} />
                 <Route path="sessions" element={<Sessions />} />
                 <Route path="sessions/:sessionId" element={<SessionDetail />} />
                 <Route path="users/:userId" element={<UserProfile />} />
-                <Route path="invites" element={<Invites />} />
+                <Route path="invites" element={<Navigate to="../leaderboard" replace />} />
                 <Route path="settings" element={<Settings />} />
                 <Route path="audit" element={<Audit />} />
                 <Route path="chat" element={<Chat />} />

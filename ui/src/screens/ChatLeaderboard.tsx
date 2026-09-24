@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Button } from "primereact/button";
-import { SelectButton } from "primereact/selectbutton";
 import {
   Bar,
   BarChart,
@@ -17,14 +16,11 @@ import { ChartControls, Grid, useGridPref } from "../components/charts";
 import { ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDate } from "../lib/format";
 
-const PERIODS: Period[] = ["7d", "30d", "all"];
 const TOPS = [5, 10, 20, 50];
 const PAGE_SIZE = 50;
 
-export default function ChatLeaderboard() {
-  const { guildId = "" } = useParams();
+export function ChatBoard({ guildId, period }: { guildId: string; period: Period }) {
   const navigate = useNavigate();
-  const [period, setPeriod] = useState<Period>("30d");
   const [page, setPage] = useState(1);
   const [top, setTop] = useState(10);
   const [grid, setGrid] = useGridPref();
@@ -50,18 +46,6 @@ export default function ChatLeaderboard() {
 
   return (
     <>
-      <div className="toolbar">
-        <SelectButton
-          className="chip-group"
-          value={period}
-          options={PERIODS.map((p) => ({ label: p, value: p }))}
-          optionValue="value"
-          onChange={(e) => {
-            setPeriod(e.value as Period);
-            setPage(1);
-          }}
-        />
-      </div>
       {items.length > 0 && (
         <Section title={`Топ-${top}, сообщения (стр. ${page})`}>
           <ChartControls top={top} setTop={setTop} topOptions={TOPS} grid={grid} setGrid={setGrid} />

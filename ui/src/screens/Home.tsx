@@ -3,6 +3,7 @@ import { Button } from "primereact/button";
 import { api } from "../api/client";
 import { ErrorBox, Loading } from "../components/ui";
 import { useGuild } from "../guild";
+import { hasUnsavedDraft } from "./settingsDraft";
 
 export default function Home() {
   const { pickGuild } = useGuild();
@@ -14,6 +15,15 @@ export default function Home() {
 
   const me = whoami.data;
   if (!me) return null;
+
+  // T07.5: переход между guild при несохранённом черновике настроек — явное предупреждение
+  const choose = (id: string) => {
+    // черновик на любой ДРУГОЙ гильдии значит, что пользователь уходит, не сохранив
+    if (hasUnsavedDraft(id) && !window.confirm("Есть несохранённые изменения настроек. Перейти на другой сервер и оставить их несохранёнными?")) {
+      return;
+    }
+    pickGuild(id);
+  };
   return (
     <div className="home">
       <h1>Estera</h1>
@@ -30,7 +40,7 @@ export default function Home() {
         <ul className="guild-list">
           {guilds.data.guilds.map((g) => (
             <li key={g.guildId}>
-              <Button onClick={() => pickGuild(g.guildId)}>{g.name}</Button>
+              <Button onClick={() => choose(g.guildId)}>{g.name}</Button>
             </li>
           ))}
         </ul>

@@ -28,23 +28,40 @@ import type {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  // структурированный detail ответа API (T07: 409 revision_conflict несёт current-документ)
+  detail?: unknown;
+  constructor(status: number, message: string, detail?: unknown) {
     super(message);
     this.status = status;
+    this.detail = detail;
   }
+}
+
+function errorFrom(status: number, statusText: string, body: unknown): ApiError {
+  let detail = statusText;
+  let structured: unknown;
+  try {
+    const payload = body as { detail?: unknown };
+    if (payload && payload.detail !== undefined) {
+      structured = payload.detail;
+      detail = typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
+    }
+  } catch {
+    /* not JSON */
+  }
+  return new ApiError(status, detail, structured);
 }
 
 async function apiGet<T>(path: string): Promise<T> {
   const response = await fetch(path, { credentials: "same-origin" });
   if (!response.ok) {
-    let detail = response.statusText;
+    let body: unknown = null;
     try {
-      const body = (await response.json()) as { detail?: string };
-      if (body.detail) detail = body.detail;
+      body = await response.json();
     } catch {
       /* not JSON */
     }
-    throw new ApiError(response.status, detail);
+    throw errorFrom(response.status, response.statusText, body);
   }
   return (await response.json()) as T;
 }
@@ -57,14 +74,13 @@ async function apiSend<T>(method: "POST" | "PATCH" | "DELETE", path: string, bod
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!response.ok) {
-    let detail = response.statusText;
+    let payload: unknown = null;
     try {
-      const payload = (await response.json()) as { detail?: string };
-      if (payload.detail) detail = typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
+      payload = await response.json();
     } catch {
       /* not JSON */
     }
-    throw new ApiError(response.status, detail);
+    throw errorFrom(response.status, response.statusText, payload);
   }
   return (await response.json()) as T;
 }
@@ -72,14 +88,13 @@ async function apiSend<T>(method: "POST" | "PATCH" | "DELETE", path: string, bod
 async function apiSendForm<T>(method: "POST", path: string, form: FormData): Promise<T> {
   const response = await fetch(path, { method, credentials: "same-origin", body: form });
   if (!response.ok) {
-    let detail = response.statusText;
+    let payload: unknown = null;
     try {
-      const payload = (await response.json()) as { detail?: string };
-      if (payload.detail) detail = typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
+      payload = await response.json();
     } catch {
       /* not JSON */
     }
-    throw new ApiError(response.status, detail);
+    throw errorFrom(response.status, response.statusText, payload);
   }
   return (await response.json()) as T;
 }

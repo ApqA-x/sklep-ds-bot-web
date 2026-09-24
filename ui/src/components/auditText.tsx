@@ -133,8 +133,163 @@ function errorSuffix(item: AuditItem): ReactNode {
   );
 }
 
-// одно предложение на запись; неизвестные действия — JSON в сворачиваемом блоке
+// фолбэк для действий без специального кейса: читаемое описание вместо сырого JSON
+const KEY_LABELS: Record<string, string> = {
+  channelId: "канал",
+  userId: "пользователь",
+  roleId: "роль",
+  guildId: "сервер",
+  presetId: "пресет",
+  subscriptionId: "подписка",
+  text: "текст",
+  name: "название",
+  nickname: "ник",
+  content: "содержимое",
+  reason: "причина",
+  seconds: "секунды",
+  duration: "длительность",
+  length: "длина",
+  mute: "заглушение",
+  ids: "список",
+  code: "код",
+  maxAge: "срок",
+  maxUses: "использований",
+  discordStatus: "ответ Discord",
+  action: "действие",
+};
+
+const ACTION_LABELS: Record<string, string> = {
+  "bot.timeout": "тайм-аут",
+  "bot.move": "перемещение в голос",
+  "bot.disconnect": "отключение от голоса",
+  "bot.role": "изменение роли",
+  "bot.kick": "кик",
+  "bot.message": "сообщение от бота",
+  "bot.invite.create": "создание инвайта",
+  "bot.invite.delete": "удаление инвайта",
+};
+
+const COMMAND_REASON_LABELS: Record<string, string> = {
+  disabled: "команда отключена в дашборде",
+  permissions: "недостаточно прав",
+  unknown: "неизвестная команда",
+  error: "ошибка выполнения",
+  rejected: "отклонено",
+};
+
+function humanizeAction(action: string): string {
+  if (ACTION_LABELS[action]) return ACTION_LABELS[action];
+  const last = action.includes(".") ? action.split(".").slice(-1)[0] : action;
+  return last.charAt(0).toUpperCase() + last.slice(1);
+}
+
+function IdRef({ keyName, id }: { keyName: string; id: string }) {
+  const k = keyName.toLowerCase();
+  if (k.includes("role")) return <Role id={id} />;
+  if (k.includes("channel")) return <Channel id={id} />;
+  return <UserLink id={id} />;
+}
+
+function renderAuditValue(key: string, value: unknown): ReactNode {
+  if (typeof value === "string" && /^\d{5,25}$/.test(value)) return <IdRef keyName={key} id={value} />;
+  if (typeof value === "boolean") return value ? "включено" : "выключено";
+  if (value === null || value === undefined || value === "") return <span className="muted">—</span>;
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span className="muted">пусто</span>;
+    const singular = key.endsWith("s") ? key.slice(0, -1) : key;
+    return (
+      <>
+        {value.map((v, i) => (
+          <span key={i}>
+            {i > 0 && ", "}
+            {renderAuditValue(singular, v)}
+          </span>
+        ))}
+      </>
+    );
+  }
+  if (typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>);
+    return (
+      <>
+        {entries.map(([k, v], i) => (
+          <span key={k}>
+            {i > 0 && "; "}
+            {KEY_LABELS[k] ?? k}: {renderAuditValue(k, v)}
+          </span>
+        ))}
+      </>
+    );
+  }
+  return String(value);
+}
+
+function GenericDetails({ item }: { item: AuditItem }) {
+  const after = (item.after ?? {}) as Record<string, unknown>;
+  const before = (item.before ?? {}) as Record<string, unknown>;
+  const hasAfter = Object.keys(after).length > 0;
+  const source = hasAfter ? after : before;
+  const wasBefore = hasAfter && Object.keys(before).length > 0;
+  const skip = (k: string) => k === "detail" || (k === "discordStatus" && item.ok);
+  const keys = Object.keys(source).filter((k) => !skip(k));
+  return (
+    <details className="intervals">
+      <summary>{humanizeAction(item.action)}</summary>
+      <div className="bot-message-detail">
+        {keys.length === 0 && <span className="muted">нет подробностей</span>}
+        {keys.map((k) => (
+          <div key={k}>
+            {KEY_LABELS[k] ?? k}: {renderAuditValue(k, source[k])}
+            {wasBefore && before[k] !== undefined && (
+              <span className="muted"> (было: {renderAuditValue(k, before[k])})</span>
+            )}
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+// вызов slash-команды бота в Discord (пишет services/commands.py бота, origin=discord)
+function CommandCall({ item }: { item: AuditItem }) {
+  const after = (item.after ?? {}) as Record<string, unknown>;
+  const command =
+    typeof after.command === "string" ? after.command : `/${item.action.slice("command.".length)}`;
+  const options =
+    after.options && typeof after.options === "object" ? (after.options as Record<string, unknown>) : {};
+  const entries = Object.entries(options);
+  const reason =
+    typeof after.reason === "string" ? COMMAND_REASON_LABELS[after.reason] ?? after.reason : "";
+  return (
+    <>
+      вызвал команду <code>{command}</code>
+      {entries.length > 0 && (
+        <details className="intervals">
+          <summary>аргументы</summary>
+          <div className="bot-message-detail">
+            {entries.map(([k, v]) => (
+              <div key={k}>
+                {KEY_LABELS[k] ?? k}: {renderAuditValue(k, v)}
+              </div>
+            ))}
+          </div>
+        </details>
+      )}
+      {!item.ok && (
+        <span style={{ color: "var(--red)" }}>
+          {" "}
+          — отклонено{reason ? `: ${reason}` : ""}
+        </span>
+      )}
+    </>
+  );
+}
+
+// одно предложение на запись; неизвестные действия — читаемый фолбэк
 export function AuditDetails({ item }: { item: AuditItem }) {
+  if (item.action.startsWith("command.")) {
+    return <CommandCall item={item} />;
+  }
   const after = (item.after ?? {}) as Record<string, unknown>;
   const before = (item.before ?? {}) as Record<string, unknown>;
   const target = targetUserId(item);
@@ -292,12 +447,7 @@ export function AuditDetails({ item }: { item: AuditItem }) {
   })();
 
   if (!body) {
-    return (
-      <details className="intervals">
-        <summary>детали</summary>
-        <pre className="inline">{JSON.stringify(item.after ?? item.before ?? null)}</pre>
-      </details>
-    );
+    return <GenericDetails item={item} />;
   }
 
   return (

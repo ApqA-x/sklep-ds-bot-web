@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import type { ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "primereact/button";
 import { Dropdown } from "primereact/dropdown";
 import { SelectButton } from "primereact/selectbutton";
 import { api } from "../api/client";
-import { DiscordActionDetails } from "../components/auditDiscordText";
+import { DiscordAuditFull } from "../components/auditDiscordText";
 import { UserLink } from "../components/userLink";
 import { TargetUserPicker } from "../components/userSearch";
 import { DateField } from "../components/dateField";
@@ -29,6 +29,15 @@ export function AuditDiscord({ guildId, toolbarExtra }: { guildId: string; toolb
   const [sort, setSort] = useState<(typeof DSort)[number]>("desc");
   const [syncMsg, setSyncMsg] = useState("");
   const [syncing, setSyncing] = useState(false);
+  const [openIds, setOpenIds] = useState<Set<string>>(new Set());
+
+  const toggleRow = (id: string) =>
+    setOpenIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const resetPage = () => setPage(1);
 
@@ -213,43 +222,52 @@ export function AuditDiscord({ guildId, toolbarExtra }: { guildId: string; toolb
         <table>
           <thead>
             <tr>
-              <th>Когда</th>
+              <th>Дата</th>
               <th>Кто</th>
-              <th>Что</th>
+              <th>Действие</th>
               <th>Над кем</th>
-              <th>Где</th>
-              <th>Причина</th>
             </tr>
           </thead>
           <tbody>
-            {data.items.map((entry) => (
-              <tr key={entry.id}>
-                <td>{fmtDate(entry.at)}</td>
-                <td>
-                  {entry.actorUserId ? (
-                    <UserLink userId={entry.actorUserId} name={entry.actorName || undefined} />
-                  ) : (
-                    "—"
+            {data.items.map((entry) => {
+              const open = openIds.has(entry.id);
+              return (
+                <Fragment key={entry.id}>
+                  <tr className={`audit-row${open ? " open" : ""}`} onClick={() => toggleRow(entry.id)}>
+                    <td>{fmtDate(entry.at)}</td>
+                    <td>
+                      {entry.actorUserId ? (
+                        <UserLink userId={entry.actorUserId} name={entry.actorName || undefined} />
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                    <td title={`Действие ${entry.actionType}`}>
+                      <span className={`caret${open ? " down" : ""}`} aria-hidden="true" />
+                      {entry.action}
+                    </td>
+                    <td>
+                      {entry.targetUserId ? (
+                        <UserLink userId={entry.targetUserId} name={entry.targetUserName || undefined} />
+                      ) : entry.targetId ? (
+                        <span title={entry.targetId}>
+                          <DName kind="role" id={entry.targetId} />
+                        </span>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  </tr>
+                  {open && (
+                    <tr className="audit-detail">
+                      <td colSpan={4}>
+                        <DiscordAuditFull entry={entry} />
+                      </td>
+                    </tr>
                   )}
-                </td>
-                <td title={`Действие ${entry.actionType}`}>
-                  <DiscordActionDetails entry={entry} />
-                </td>
-                <td>
-                  {entry.targetUserId ? (
-                    <UserLink userId={entry.targetUserId} name={entry.targetUserName || undefined} />
-                  ) : entry.targetId ? (
-                    <span title={entry.targetId}>
-                      <DName kind="role" id={entry.targetId} />
-                    </span>
-                  ) : (
-                    "—"
-                  )}
-                </td>
-                <td>{entry.channelId ? <DName kind="channel" id={entry.channelId} /> : "—"}</td>
-                <td>{entry.reason || "—"}</td>
-              </tr>
-            ))}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       )}

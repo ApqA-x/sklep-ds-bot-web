@@ -576,6 +576,44 @@ pre.inline {
 .discord-details .diff-line {
   display: block;
 }
+/* журнал Discord: кликабельные строки + блок «подробнее» */
+.audit-row {
+  cursor: pointer;
+}
+.audit-row:hover td {
+  background: var(--surface0);
+}
+.audit-row.open td {
+  background: var(--surface1);
+}
+.caret {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin-right: 7px;
+  border-left: 6px solid var(--overlay1);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform 0.15s ease;
+}
+.caret.down {
+  transform: rotate(90deg);
+}
+.audit-detail td {
+  background: var(--surface0);
+}
+.audit-full .audit-line {
+  display: block;
+  margin: 3px 0;
+}
+.perm-add {
+  border-color: var(--green) !important;
+  color: var(--green);
+}
+.perm-del {
+  border-color: var(--red) !important;
+  color: var(--red);
+}
 .tiny-chip {
   display: inline-block;
   margin: 0 3px 2px 0;

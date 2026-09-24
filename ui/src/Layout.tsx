@@ -61,7 +61,9 @@ export default function Layout() {
         )}
       </header>
       <main className="content">
-        <Outlet />
+        {/* T04.6: смена гильдии полностью перемонтирует экран — выбранные каналы,
+            файлы, модалки и pending-операции предыдущей гильдии не переносятся */}
+        <Outlet key={guildId} />
       </main>
     </div>
   );

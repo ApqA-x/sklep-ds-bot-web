@@ -62,6 +62,9 @@ async def perms_for(request: Request, guild_id: str) -> int:
     cfg = _cfg(request)
     if not cfg.auth_enabled:
         return ADMINISTRATOR  # dev mode: gate disabled, deployment must not expose port
+    if not cfg.guild_allowed(guild_id):
+        # D01: guilds outside the release allowlist do not exist for the panel.
+        raise HTTPException(status_code=404, detail="guild not found")
     session_data = request.session.get(SESSION_KEY)
     if not session_data:
         raise HTTPException(status_code=401, detail="login required")
@@ -209,7 +212,7 @@ async def _accessible_guilds(request: Request, cfg: WebConfig, user_id: str) -> 
     out = []
     for guild in bot_guilds:
         gid = str(guild.get("id") or "")
-        if not gid:
+        if not gid or not cfg.guild_allowed(gid):
             continue
         try:
             status, perms = await _resolve_fresh(request, gid, user_id)

@@ -16,18 +16,41 @@ from fakes import FakeDB
 GUILD = "170000000000000000"
 USER = "160000000000000001"
 ROLE = "150000000000000000"
-CHANNEL = "140000000000000000"
+CHANNEL = "140000000000000000"  # текстовый (type 0)
+VOICE = "140000000000000009"  # голосовой (type 2) — цели move
+
+
+def _meta_payload(path: str):
+    """Метаданные ресурсов для GET-проверок T04: всё принадлежит нашей гильдии."""
+    if path.startswith("/channels/"):
+        cid = path.split("/")[2]
+        return {"id": cid, "guild_id": GUILD, "type": 2 if cid == VOICE else 0}
+    if path.startswith("/invites/"):
+        return {"code": path.rsplit("/", 1)[1], "guild_id": GUILD}
+    if path.endswith("/roles") and path.startswith("/guilds/"):
+        return [{"id": ROLE, "name": "role"}]
+    return {"id": USER}
+
+
+def _make_fake(recorded: list[dict], *, mutation_status: int = 200):
+    async def fake_request(cfg, method, path, *, json_body=None, reason=None, files=None):
+        if method != "GET":
+            # записываем только изменяющие вызовы — проверки (GET) не считаются мутациями
+            recorded.append(
+                {"method": method, "path": path, "json": json_body, "reason": reason, "files": files}
+            )
+            if mutation_status != 200:
+                return mutation_status, {"message": "Missing Permissions"}
+            return 200, {"id": "ok"}
+        return 200, _meta_payload(path)
+
+    return fake_request
 
 
 @pytest.fixture()
 def calls(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     recorded: list[dict] = []
-
-    async def fake_request(cfg, method, path, *, json_body=None, reason=None, files=None):
-        recorded.append({"method": method, "path": path, "json": json_body, "reason": reason})
-        return 200, {"id": "ok"}
-
-    monkeypatch.setattr(discord_api, "bot_request", fake_request)
+    monkeypatch.setattr(discord_api, "bot_request", _make_fake(recorded))
     bot_module._reset_rate_buckets()
     auth_module._clear_recheck_cache()
     return recorded
@@ -36,12 +59,7 @@ def calls(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
 @pytest.fixture()
 def files_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict]:
     recorded: list[dict] = []
-
-    async def fake_request(cfg, method, path, *, json_body=None, reason=None, files=None):
-        recorded.append({"method": method, "path": path, "json": json_body, "files": files})
-        return 200, {"id": "ok"}
-
-    monkeypatch.setattr(discord_api, "bot_request", fake_request)
+    monkeypatch.setattr(discord_api, "bot_request", _make_fake(recorded))
     bot_module._reset_rate_buckets()
     auth_module._clear_recheck_cache()
     return recorded
@@ -64,6 +82,7 @@ def test_role_grant_and_revoke(calls: list[dict]) -> None:
         "path": f"/guilds/{GUILD}/members/{USER}/roles/{ROLE}",
         "json": None,
         "reason": None,
+        "files": None,
     }
     client.post(f"/api/guild/{GUILD}/bot/member/{USER}/roles", json={"roleId": ROLE, "action": "revoke"})
     assert calls[-1]["method"] == "DELETE"
@@ -87,13 +106,14 @@ def test_invalid_seconds_422(calls: list[dict]) -> None:
 def test_move_kick_message_invite(calls: list[dict]) -> None:
     client = _client()
     assert client.post(
-        f"/api/guild/{GUILD}/bot/member/{USER}/move", json={"channelId": CHANNEL}
+        f"/api/guild/{GUILD}/bot/member/{USER}/move", json={"channelId": VOICE}
     ).status_code == 200
     assert calls[-1] == {
         "method": "PATCH",
         "path": f"/guilds/{GUILD}/members/{USER}",
-        "json": {"channel_id": CHANNEL},
+        "json": {"channel_id": VOICE},
         "reason": None,
+        "files": None,
     }
     client.post(f"/api/guild/{GUILD}/bot/member/{USER}/kick", json={"reason": "spam"})
     assert calls[-1]["method"] == "DELETE" and calls[-1]["reason"] == "spam"
@@ -118,10 +138,9 @@ def test_path_injection_rejected(calls: list[dict]) -> None:
 
 
 def test_discord_error_maps_502_and_audits(monkeypatch: pytest.MonkeyPatch) -> None:
-    async def fail_request(cfg, method, path, *, json_body=None, reason=None, files=None):
-        return 403, {"message": "Missing Permissions"}
-
-    monkeypatch.setattr(discord_api, "bot_request", fail_request)
+    recorded: list[dict] = []
+    # GET-проверки T04 проходят, сама мутация получает 403 от Discord
+    monkeypatch.setattr(discord_api, "bot_request", _make_fake(recorded, mutation_status=403))
     bot_module._reset_rate_buckets()
     client = _client()
     response = client.post(
@@ -155,6 +174,7 @@ def test_disconnect_member(calls: list[dict]) -> None:
         "path": f"/guilds/{GUILD}/members/{USER}",
         "json": {"channel_id": None},
         "reason": None,
+        "files": None,
     }
     audit = client.app.state.db[mutations.COLL_AUDIT].docs[0]
     assert audit["action"] == "bot.disconnect"
@@ -413,6 +433,7 @@ def test_message_json_still_works(files_calls: list[dict]) -> None:
         "path": f"/channels/{CHANNEL}/messages",
         "json": {"content": "plain json"},
         "files": None,
+        "reason": None,
     }
     # пустой content по-прежнему 422
     assert client.post(f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message", json={"content": "  "}).status_code == 422

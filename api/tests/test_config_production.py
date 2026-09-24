@@ -22,6 +22,7 @@ GOOD = {
     "WEB_SESSION_SECRET": "s" * 40,
     "WEB_PUBLIC_URL": "https://panel.example",
     "DISCORD_REDIRECT_URI": "https://panel.example/api/auth/callback",
+    "WEB_GUILD_ALLOWLIST": "170000000000000000",
     "MONGO_URI": "",
     "MONGO_DB": "",
 }
@@ -49,6 +50,21 @@ def test_missing_each_required_key_breaks_startup(missing_key: str) -> None:
     with pytest.raises(ConfigError) as err:
         load_config(env=env)
     assert missing_key in str(err.value)
+
+
+# D01: production без валидного allowlist не стартует.
+@pytest.mark.parametrize("raw", ["", "   ", ","])
+def test_production_requires_guild_allowlist(raw: str) -> None:
+    env = _production_env(WEB_GUILD_ALLOWLIST=raw)
+    with pytest.raises(ConfigError) as err:
+        load_config(env=env)
+    assert "WEB_GUILD_ALLOWLIST" in str(err.value)
+
+
+def test_allowlist_rejects_non_snowflake() -> None:
+    with pytest.raises(ConfigError) as err:
+        load_config(env=_production_env(WEB_GUILD_ALLOWLIST="170000000000000000, not-a-number"))
+    assert "WEB_GUILD_ALLOWLIST" in str(err.value)
 
 
 def test_missing_public_url_breaks_startup() -> None:
@@ -87,7 +103,7 @@ def test_anonymous_api_gets_401_and_login_stays_reachable() -> None:
     client = TestClient(
         create_app(config=cfg, db=FakeDB()), base_url="https://panel.example", follow_redirects=False
     )
-    guild = "170000000000000001"
+    guild = "170000000000000000"  # из allowlist: анониму положен 401, а не 404
     responses = [
         client.get(f"/api/guild/{guild}/audit"),
         client.patch(f"/api/guild/{guild}/settings", json={"logChannelId": "1"}),
@@ -99,6 +115,17 @@ def test_anonymous_api_gets_401_and_login_stays_reachable() -> None:
     login = client.get("/api/auth/login")
     assert login.status_code == 302
     assert login.headers["location"].startswith("https://discord.com/oauth2/authorize")
+
+
+# D01: гильдия вне allowlist не существует для панели даже до проверки сессии.
+def test_guild_outside_allowlist_is_404() -> None:
+    cfg = load_config(env=_production_env())
+    client = TestClient(
+        create_app(config=cfg, db=FakeDB()), base_url="https://panel.example", follow_redirects=False
+    )
+    foreign = "170000000000000099"
+    assert client.get(f"/api/guild/{foreign}/audit").status_code == 404
+    assert client.get("/api/auth/whoami").status_code == 200  # own session unaffected
 
 
 def test_production_app_cannot_be_constructed_with_auth_disabled() -> None:

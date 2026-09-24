@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from . import mutations, queries
 from .auth import actor_of, require_guild_admin
+from .bot import _check_channel, _check_role
 from .models import ChatPresetAction, GuildSettingsPatch, ListMemberAction, StalkerAction
 
 SNOWFLAKE_RE = re.compile(r"^\d{5,25}$")
@@ -40,10 +41,25 @@ def _guild(guild_id: str) -> str:
 
 
 @router.patch("/settings")
-def patch_settings(request: Request, guildId: str, body: GuildSettingsPatch) -> dict:
+async def patch_settings(request: Request, guildId: str, body: GuildSettingsPatch) -> dict:
     guild = _guild(guildId)
     if not body.mongo_set():
         raise HTTPException(status_code=422, detail="empty patch")
+    # G04: чужие resource ID отвергаются сервером до записи — не полагаться на UI picker.
+    for field in (
+        "summaryChannelId",
+        "fallbackSummaryChannelId",
+        "activityChannelId",
+    ):
+        channel_id = getattr(body, field, None)
+        if channel_id:
+            await _check_channel(request, guild, channel_id)
+    for channel_id in (body.trackedChannelIds or []):
+        await _check_channel(request, guild, channel_id)
+    for channel_id in (body.activityCategoryChannelIds or {}).values():
+        await _check_channel(request, guild, channel_id)
+    if body.autoRoleId:
+        await _check_role(request, guild, body.autoRoleId)
     status, doc = mutations.patch_guild_settings(_db(request), guild, body, actor_of(request))
     if status == "conflict":
         raise HTTPException(status_code=409, detail="settings changed since you loaded them")

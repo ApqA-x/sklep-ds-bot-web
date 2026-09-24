@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { Button } from "primereact/button";
 import { Checkbox } from "primereact/checkbox";
+import { ColorPicker } from "primereact/colorpicker";
 import { Dropdown } from "primereact/dropdown";
 import { InputText } from "primereact/inputtext";
 import { api, useCanWrite } from "../api/client";
@@ -67,6 +68,7 @@ const EDITABLE_KEYS = [
   "activityChannelId",
   "activityCategoryChannelIds",
   "activityEventTypes",
+  "activityEventColors",
   "commandAccess",
 ] as const;
 
@@ -82,6 +84,46 @@ function asRecord(value: unknown): Record<string, string> {
   }
   return {};
 }
+
+// цвет-в-настройках хранится как RGB int (0..0xFFFFFF); пустой = дефолт бота
+function asColorRecord(value: unknown): Record<string, number> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof v === "number" && v >= 0 && v <= 0xffffff) out[k] = Math.round(v);
+  }
+  return out;
+}
+
+function intToHexColor(value: number): string {
+  return `#${(value & 0xffffff).toString(16).padStart(6, "0")}`;
+}
+
+// нормализация значения ColorPicker: PrimeReact отдаёт hex БЕЗ "#"
+function hexToIntColor(value: unknown): number | null {
+  const clean = String(value ?? "").trim().replace(/^#/, "");
+  if (!/^[0-9a-fA-F]{6}$/.test(clean)) return null;
+  return parseInt(clean, 16);
+}
+
+// дефолты полоски activity-карточки, если в настройках цвет не задан (копия dsbot domain)
+const DEFAULT_ACTIVITY_COLORS: Record<string, number> = {
+  member_join: 0x57f287,
+  member_leave: 0xed4245,
+  invite_create: 0x5865f2,
+  invite_delete: 0x95a5a6,
+  invite_used: 0x57f287,
+  message_create: 0x3498db,
+  message_update: 0x3498db,
+  message_delete: 0x3498db,
+  reaction_add: 0xfee75c,
+  reaction_remove: 0xfee75c,
+  voice_join: 0x57f287,
+  voice_leave: 0x57f287,
+  voice_move: 0x57f287,
+  profile_nickname_update: 0xe67e22,
+  profile_roles_update: 0xe67e22,
+};
 
 function NameHint({ kind, value }: { kind: NameKind; value: unknown }) {
   const id = String(value ?? "");
@@ -329,6 +371,13 @@ export default function Settings() {
   const allRoles = picker.data?.roles ?? [];
   const categoryChannels = asRecord(form.activityCategoryChannelIds);
   const commandAccess = asRecord(form.commandAccess);
+  const eventColors = asColorRecord(form.activityEventColors);
+  const setEventColor = (eventKey: string, value: number | null) => {
+    const next = { ...eventColors };
+    if (value === null) delete next[eventKey];
+    else next[eventKey] = value;
+    set("activityEventColors", next);
+  };
   const setCategoryChannel = (category: string, channelId: string) => {
     const next = { ...categoryChannels };
     if (channelId === "") delete next[category];
@@ -421,27 +470,59 @@ export default function Settings() {
             />
           ))}
         </div>
+        <p className="muted tiny">
+          Галочка — включить тип событий; палитра — цвет полоски карточки (по умолчанию — цвет бота, «×» —
+          вернуть его).
+        </p>
         <div className="events-grid">
-          {ACTIVITY_EVENT_TYPES.map(([key, title, hint]) => (
-            <label key={key} className="check" title={hint}>
-              <Checkbox
-                disabled={!canWrite}
-                checked={eventTypes.includes(key)}
-                onChange={() =>
-                  set(
-                    "activityEventTypes",
-                    eventTypes.includes(key)
-                      ? eventTypes.filter((x) => x !== key)
-                      : [...new Set([...eventTypes, key])],
-                  )
-                }
-              />
-              <span>
-                {title}
-                <span className="muted tiny"> — {hint}</span>
-              </span>
-            </label>
-          ))}
+          {ACTIVITY_EVENT_TYPES.map(([key, title, hint]) => {
+            const custom = eventColors[key];
+            const effective = custom ?? DEFAULT_ACTIVITY_COLORS[key] ?? 0x5865f2;
+            return (
+              <div className="event-row" key={key} title={hint}>
+                <label className="check event-row-main">
+                  <Checkbox
+                    disabled={!canWrite}
+                    checked={eventTypes.includes(key)}
+                    onChange={() =>
+                      set(
+                        "activityEventTypes",
+                        eventTypes.includes(key)
+                          ? eventTypes.filter((x) => x !== key)
+                          : [...new Set([...eventTypes, key])],
+                      )
+                    }
+                  />
+                  <span>
+                    {title}
+                    <span className="muted tiny"> — {hint}</span>
+                  </span>
+                </label>
+                <span className="event-color" title={`цвет полоски: ${intToHexColor(effective)}`}>
+                  <ColorPicker
+                    value={intToHexColor(effective)}
+                    format="hex"
+                    disabled={!canWrite || !eventTypes.includes(key)}
+                    onChange={(e) => {
+                      const parsed = hexToIntColor(e.value);
+                      if (parsed !== null) setEventColor(key, parsed);
+                    }}
+                  />
+                  {custom !== undefined && (
+                    <Button
+                      className="chip-x"
+                      text
+                      title="вернуть цвет по умолчанию"
+                      disabled={!canWrite}
+                      onClick={() => setEventColor(key, null)}
+                    >
+                      ×
+                    </Button>
+                  )}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </Section>
       <Section title="Команды бота">

@@ -101,6 +101,46 @@ def test_patch_rejects_bad_command_access_and_categories() -> None:
     ).status_code == 422
 
 
+def test_patch_activity_event_colors() -> None:
+    db = _settings_db()
+    client = _dev_client(db)
+    response = client.patch(
+        f"/api/guild/{GUILD}/settings",
+        json={"activityEventColors": {"member_join": 0x00FF00, "member_leave": 0xED4245}},
+    )
+    assert response.status_code == 200
+    call = _update_calls(db, queries.COLL_GUILD_SETTINGS)[-1]
+    assert call[3]["$set"]["activityEventColors"] == {"member_join": 0x00FF00, "member_leave": 0xED4245}
+    # пустой словарь = сброс всех кастомных цветов
+    reset = client.patch(f"/api/guild/{GUILD}/settings", json={"activityEventColors": {}})
+    assert reset.status_code == 200
+    assert _update_calls(db, queries.COLL_GUILD_SETTINGS)[-1][3]["$set"]["activityEventColors"] == {}
+
+
+def test_patch_rejects_bad_activity_event_colors() -> None:
+    client = _dev_client(_settings_db())
+    # неизвестный тип события
+    assert (
+        client.patch(f"/api/guild/{GUILD}/settings", json={"activityEventColors": {"nope": 255}}).status_code == 422
+    )
+    # цвет вне диапазона RGB
+    assert (
+        client.patch(f"/api/guild/{GUILD}/settings", json={"activityEventColors": {"member_join": -1}}).status_code
+        == 422
+    )
+    assert (
+        client.patch(
+            f"/api/guild/{GUILD}/settings", json={"activityEventColors": {"member_join": 0x1000000}}
+        ).status_code
+        == 422
+    )
+    # не число
+    assert (
+        client.patch(f"/api/guild/{GUILD}/settings", json={"activityEventColors": {"member_join": "red"}}).status_code
+        == 422
+    )
+
+
 def test_patch_conflict_on_stale_updated_at() -> None:
     db = _settings_db(updatedAt=datetime(2026, 9, 10, 12, tzinfo=timezone.utc))
     client = _dev_client(db)

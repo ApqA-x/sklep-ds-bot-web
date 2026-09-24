@@ -69,6 +69,8 @@ class GuildSettingsPatch(BaseModel):
     activityChannelId: str | None = None
     activityCategoryChannelIds: dict[str, str] | None = None
     activityEventTypes: list[str] | None = None
+    # тип события -> цвет полоски карточки (RGB int); отсутствие ключа = дефолт бота
+    activityEventColors: dict[str, int] | None = None
     commandAccess: dict[str, str] | None = None
     expectedUpdatedAt: str | None = None
 
@@ -108,6 +110,19 @@ class GuildSettingsPatch(BaseModel):
         if unknown:
             raise ValueError(f"unknown activity categories: {sorted(unknown)}")
         return {k: _check_id(v, "channelId") for k, v in value.items()}
+
+    @field_validator("activityEventColors")
+    @classmethod
+    def _event_colors(cls, value: dict[str, int] | None) -> dict[str, int] | None:
+        if value is None:
+            return None
+        unknown = set(value) - ACTIVITY_EVENT_TYPES
+        if unknown:
+            raise ValueError(f"unknown activity event types: {sorted(unknown)}")
+        for event_type, color in value.items():
+            if isinstance(color, bool) or not 0 <= int(color) <= 0xFFFFFF:
+                raise ValueError(f"color for {event_type!r} must be 0..16777215")
+        return {k: int(v) for k, v in value.items()}
 
     @field_validator("commandAccess")
     @classmethod

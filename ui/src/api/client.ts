@@ -5,6 +5,7 @@ import type {
   ChatChannel,
   ChatLeaderboard,
   ChatMessagesPage,
+  ChatPresetPage,
   DiscordAuditPage,
   GuildAccess,
   GuildSettingsDoc,
@@ -156,6 +157,20 @@ export const api = {
 
   chatChannels: (guildId: string) =>
     apiGet<{ guildId: string; items: ChatChannel[] }>(`/api/guild/${guildId}/chat/channels`),
+
+  chatPresets: (guildId: string) => apiGet<ChatPresetPage>(`/api/guild/${guildId}/chat-presets`),
+
+  chatPresetAdd: (guildId: string, text: string) =>
+    apiSend<{ ok: boolean; presetId: string }>("POST", `/api/guild/${guildId}/chat-presets`, {
+      action: "add",
+      text,
+    }),
+
+  chatPresetRemove: (guildId: string, presetId: string) =>
+    apiSend<{ ok: boolean; presetId: string }>("POST", `/api/guild/${guildId}/chat-presets`, {
+      action: "remove",
+      presetId,
+    }),
 
   chatMessages: (
     guildId: string,

@@ -167,6 +167,51 @@ def test_stalker_add_and_remove() -> None:
     assert db[COLL_STALKER].docs == []
 
 
+def test_chat_preset_add_list_remove() -> None:
+    db = _settings_db()
+    client = _dev_client(db)
+    add = client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "add", "text": "  привет  "})
+    assert add.status_code == 200
+    preset_id = add.json()["presetId"]
+    doc = db[queries.COLL_CHAT_PRESETS].docs[0]
+    assert doc["_id"] == preset_id
+    assert doc["guildId"] == GUILD
+    assert doc["text"] == "привет"  # текст нормализуется моделью
+    listing = client.get(f"/api/guild/{GUILD}/chat-presets")
+    assert listing.status_code == 200
+    items = listing.json()["items"]
+    assert len(items) == 1
+    assert items[0]["id"] == preset_id and items[0]["text"] == "привет"
+    assert items[0]["createdAt"]
+    actions = [d["action"] for d in db[COLL_AUDIT].docs]
+    assert actions == ["chatPreset.add"]
+    remove = client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "remove", "presetId": preset_id})
+    assert remove.status_code == 200
+    assert db[queries.COLL_CHAT_PRESETS].docs == []
+    assert [d["action"] for d in db[COLL_AUDIT].docs] == ["chatPreset.add", "chatPreset.remove"]
+
+
+def test_chat_preset_validation() -> None:
+    db = _settings_db()
+    client = _dev_client(db)
+    assert client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "add", "text": "   "}).status_code == 422
+    assert client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "add"}).status_code == 422
+    assert client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "remove"}).status_code == 422
+    assert client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "add", "text": "x" * 2001}).status_code == 422
+    assert db[queries.COLL_CHAT_PRESETS].docs == []
+
+
+def test_chat_preset_remove_scoped_to_guild() -> None:
+    db = _settings_db()
+    client = _dev_client(db)
+    add = client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "add", "text": "наш"})
+    preset_id = add.json()["presetId"]
+    other = "170000000000000001"
+    remove = client.post(f"/api/guild/{other}/chat-presets", json={"action": "remove", "presetId": preset_id})
+    assert remove.status_code == 200  # чужой id просто ничего не удаляет
+    assert db[queries.COLL_CHAT_PRESETS].docs[0]["_id"] == preset_id
+
+
 def test_audit_page_lists_recent_first() -> None:
     db = _settings_db()
     client = _dev_client(db)

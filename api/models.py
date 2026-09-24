@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 SNOWFLAKE_RE = re.compile(r"^\d{5,25}$")
 
@@ -220,6 +220,30 @@ class ChannelMessageAction(BaseModel):
         if not 1 <= len(value) <= 2000:
             raise ValueError("content must be 1..2000 characters")
         return value
+
+
+class ChatPresetAction(BaseModel):
+    """Пресет текста для отправки в чат: add сохраняет текст, remove удаляет по id."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    action: Literal["add", "remove"]
+    text: str | None = None
+    presetId: str | None = None
+
+    @model_validator(mode="after")
+    def _check_per_action(self) -> "ChatPresetAction":
+        if self.action == "add":
+            text = (self.text or "").strip()
+            if not 1 <= len(text) <= 2000:
+                raise ValueError("text must be 1..2000 characters")
+            self.text = text
+        else:
+            preset_id = (self.presetId or "").strip()
+            if not 1 <= len(preset_id) <= 64:
+                raise ValueError("presetId is required for remove")
+            self.presetId = preset_id
+        return self
 
 
 class InviteCreateAction(BaseModel):

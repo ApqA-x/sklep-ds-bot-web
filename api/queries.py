@@ -15,6 +15,7 @@ COLL_NICKNAME_HISTORY = "member_nickname_history"
 COLL_NICKNAME_STATE = "member_nickname_state"
 COLL_INVITE_CATALOG = "invite_catalog"
 COLL_CHAT = "chat_messages"
+COLL_CHAT_PRESETS = "chat_presets"
 COLL_AVATAR_HISTORY = "user_avatar_history"
 
 PERIODS: dict[str, timedelta | None] = {
@@ -597,6 +598,42 @@ def known_user_names(db: Any, guild_id: str) -> dict[str, str]:
     return names
 
 
+_user_colors_cache = TTLCache(ttl_seconds=300.0)
+
+
+def known_user_colors(db: Any, guild_id: str, role_meta: dict[str, tuple[int, int]]) -> dict[str, str]:
+    """userId -> hex цвета как в Discord: цвет самой высокой по позиции роли с цветом.
+
+    role_meta: roleId -> (color int, position). Роли без цвета не участвуют;
+    пользователь без цветных ролей в ответ не попадает (UI даст цвет по умолчанию).
+    """
+    cached = _user_colors_cache.get(guild_id)
+    if cached is not None:
+        return cached
+    out: dict[str, str] = {}
+    for doc in db[COLL_ROLE_STATE].find({"guildId": guild_id}, {"userId": 1, "roleIds": 1}):
+        uid = str(doc.get("userId") or "")
+        if not uid:
+            continue
+        best_pos, best_color = -1, 0
+        for rid in doc.get("roleIds") or []:
+            color, pos = role_meta.get(str(rid)) or (0, 0)
+            if color and pos > best_pos:
+                best_pos, best_color = pos, color
+        if best_color:
+            out[uid] = f"#{best_color:06x}"
+    _user_colors_cache.set(guild_id, out)
+    return out
+
+
+def chat_presets(db: Any, guild_id: str) -> list[dict[str, Any]]:
+    docs = db[COLL_CHAT_PRESETS].find({"guildId": guild_id}, sort=[("createdAt", 1)])
+    return [
+        {"id": str(doc.get("_id")), "text": str(doc.get("text") or ""), "createdAt": _iso(doc.get("createdAt"))}
+        for doc in docs
+    ]
+
+
 def chat_channels(db: Any, guild_id: str) -> list[dict[str, Any]]:
     """Text channels of a guild that have stored messages, most recent activity first."""
     pipeline = [
@@ -711,6 +748,7 @@ WEB_INDEXES: list[tuple[str, list[tuple[str, int]], str]] = [
     # имя совпадает с индексом writer'а бота (dsbot ensure_indexes) — иначе Mongo считает это
     # «тот же ключ под другим именем» (code 85) и пересоздание конфликует
     (COLL_CHAT, [("guildId", 1), ("channelId", 1), ("sentAt", -1)], "chat_guildId_channelId_sentAt"),
+    (COLL_CHAT_PRESETS, [("guildId", 1), ("createdAt", 1)], "chat_presets_guildId_createdAt"),
 ]
 
 

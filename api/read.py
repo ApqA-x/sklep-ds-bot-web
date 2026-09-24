@@ -454,4 +454,23 @@ async def guild_names(request: Request, guildId: str) -> dict:
         pass  # without a bot token names fall back to ids in the UI
     db = getattr(request.app.state, "db", None)
     users = queries.known_user_names(db, guild) if db is not None else {}
-    return {"guildId": guild, "guildName": guild_name, "channels": channels, "roles": roles, "users": users}
+    user_colors: dict[str, str] = {}
+    if db is not None:
+        try:
+            role_rows = await discord_api.guild_roles_raw(cfg, guild)
+        except discord_api.DiscordError:
+            role_rows = []
+        role_meta = {
+            str(row.get("id")): (int(row.get("color") or 0), int(row.get("position") or 0))
+            for row in role_rows
+            if row.get("id")
+        }
+        user_colors = queries.known_user_colors(db, guild, role_meta)
+    return {
+        "guildId": guild,
+        "guildName": guild_name,
+        "channels": channels,
+        "roles": roles,
+        "users": users,
+        "userColors": user_colors,
+    }

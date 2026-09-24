@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
 from . import queries
-from .models import GuildSettingsPatch, ListMemberAction, StalkerAction
+from .models import ChatPresetAction, GuildSettingsPatch, ListMemberAction, StalkerAction
 
 COLL_AUDIT = "web_audit_logs"
 COLL_STALKER = "stalker_subscriptions"
@@ -165,6 +166,32 @@ def mutate_stalker(db: Any, guild_id: str, body: StalkerAction, actor: dict[str,
 
 
 _SNOWFLAKE = re.compile(r"^\d{5,25}$")
+
+
+def mutate_chat_preset(
+    db: Any, guild_id: str, body: ChatPresetAction, actor: dict[str, str]
+) -> dict[str, Any]:
+    """add записывает текстовый пресет в chat_presets, remove удаляет по id гильдии."""
+    now = _utc_now()
+    if body.action == "add":
+        text = (body.text or "").strip()
+        if not 1 <= len(text) <= 2000:
+            raise ValueError("chat preset text must be 1..2000 chars")
+        preset_id = uuid.uuid4().hex
+        db[queries.COLL_CHAT_PRESETS].insert_one(
+            {"_id": preset_id, "guildId": guild_id, "text": text, "createdAt": now}
+        )
+    else:
+        preset_id = (body.presetId or "").strip()
+        db[queries.COLL_CHAT_PRESETS].delete_one({"_id": preset_id, "guildId": guild_id})
+    record_audit(
+        db,
+        guild_id=guild_id,
+        actor=actor,
+        action=f"chatPreset.{body.action}",
+        after={"presetId": preset_id, "text": body.text if body.action == "add" else None},
+    )
+    return {"ok": True, "presetId": preset_id}
 
 
 def _target_filter(user_id: str) -> dict[str, Any]:

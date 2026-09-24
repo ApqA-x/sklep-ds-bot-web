@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from . import mutations, queries
 from .auth import actor_of, require_guild_admin
-from .models import GuildSettingsPatch, ListMemberAction, StalkerAction
+from .models import ChatPresetAction, GuildSettingsPatch, ListMemberAction, StalkerAction
 
 SNOWFLAKE_RE = re.compile(r"^\d{5,25}$")
 
@@ -72,6 +72,18 @@ def mutate_auto_unmute(request: Request, guildId: str, body: ListMemberAction) -
 def mutate_stalker(request: Request, guildId: str, body: StalkerAction) -> dict:
     guild = _guild(guildId)
     return mutations.mutate_stalker(_db(request), guild, body, actor_of(request))
+
+
+@router.get("/chat-presets")
+def list_chat_presets(request: Request, guildId: str) -> dict:
+    guild = _guild(guildId)
+    return {"guildId": guild, "items": queries.chat_presets(_db(request), guild)}
+
+
+@router.post("/chat-presets")
+def mutate_chat_preset(request: Request, guildId: str, body: ChatPresetAction) -> dict:
+    guild = _guild(guildId)
+    return mutations.mutate_chat_preset(_db(request), guild, body, actor_of(request))
 
 
 @router.get("/stalker")

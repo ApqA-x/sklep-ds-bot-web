@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { Button } from "primereact/button";
+import { confirmDialog } from "primereact/confirmdialog";
 import { MultiSelect } from "primereact/multiselect";
 import { SelectButton } from "primereact/selectbutton";
 import { InputTextarea } from "primereact/inputtextarea";
 import { api, useCanWrite } from "../api/client";
-import type { ChatAttachment, ChatMessage } from "../api/types";
+import type { ChatAttachment, ChatMessage, ChatPreset } from "../api/types";
 import { TargetUserPicker } from "../components/userSearch";
 import { DateField } from "../components/dateField";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
@@ -87,14 +88,21 @@ function validateAttachments(next: File[]): string | null {
 
 function BotSendPanel({ guildId }: { guildId: string }) {
   const picker = usePicker(guildId);
+  const queryClient = useQueryClient();
   const [targets, setTargets] = useState<string[]>([]);
   const [text, setText] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
+  const [presetError, setPresetError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [armed, setArmed] = useState(false); // первое нажатие при N>1 — только взводишь подтверждение
   const [results, setResults] = useState<SendResult[] | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  const presets = useQuery({
+    queryKey: ["chat-presets", guildId],
+    queryFn: () => api.chatPresets(guildId),
+  });
 
   const liveChannels = picker.data?.textChannels ?? [];
   const options = liveChannels.map((c) => ({ label: c.name, value: c.id }));
@@ -122,19 +130,14 @@ function BotSendPanel({ guildId }: { guildId: string }) {
     setAttachError(null);
   };
 
-  const send = async () => {
-    if (!ready) return;
-    if (needsConfirm && !armed) {
-      setArmed(true);
-      return;
-    }
+  const dispatch = async (body: string, attach: File[], clearOnOk: boolean) => {
     setArmed(false);
     setSending(true);
     setResults([]);
     const out: SendResult[] = [];
     for (const channelId of targets) {
       try {
-        await api.botMessage(guildId, channelId, trimmed, files);
+        await api.botMessage(guildId, channelId, body, attach);
         out.push({ channelId, ok: true });
       } catch (err) {
         out.push({ channelId, ok: false, error: err instanceof Error ? err.message : String(err) });
@@ -143,9 +146,55 @@ function BotSendPanel({ guildId }: { guildId: string }) {
       await new Promise((r) => setTimeout(r, SEND_PAUSE_MS));
     }
     setSending(false);
-    if (out.every((r) => r.ok)) {
+    if (clearOnOk && out.every((r) => r.ok)) {
       setText("");
       setFiles([]);
+    }
+  };
+
+  const send = async () => {
+    if (!ready) return;
+    if (needsConfirm && !armed) {
+      setArmed(true);
+      return;
+    }
+    await dispatch(trimmed, files, true);
+  };
+
+  const sendPreset = (preset: ChatPreset) => {
+    if (sending || targets.length === 0) return;
+    if (targets.length > 1) {
+      confirmDialog({
+        header: "Отправка пресета",
+        message: `Отправить пресет в ${targets.length} канала?`,
+        icon: "pi pi-exclamation-triangle",
+        acceptLabel: "Отправить",
+        rejectLabel: "Отмена",
+        accept: () => void dispatch(preset.text, [], false),
+      });
+      return;
+    }
+    void dispatch(preset.text, [], false);
+  };
+
+  const savePreset = async () => {
+    if (!trimmed) return;
+    try {
+      setPresetError(null);
+      await api.chatPresetAdd(guildId, trimmed);
+      await queryClient.invalidateQueries({ queryKey: ["chat-presets", guildId] });
+    } catch (err) {
+      setPresetError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const removePreset = async (presetId: string) => {
+    try {
+      setPresetError(null);
+      await api.chatPresetRemove(guildId, presetId);
+      await queryClient.invalidateQueries({ queryKey: ["chat-presets", guildId] });
+    } catch (err) {
+      setPresetError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -182,6 +231,37 @@ function BotSendPanel({ guildId }: { guildId: string }) {
           setArmed(false);
         }}
       />
+      <div className="preset-row">
+        <Button className="chip" icon="pi pi-bookmark" disabled={!trimmed || sending} onClick={() => void savePreset()}>
+          сохранить как пресет
+        </Button>
+        {(presets.data?.items.length ?? 0) > 0 && (
+          <span className="muted tiny">клик по пресету — отправить в выбранные каналы</span>
+        )}
+      </div>
+      {presetError && <p className="hint danger">{presetError}</p>}
+      {(presets.data?.items.length ?? 0) > 0 && (
+        <div className="preset-list">
+          {presets.data!.items.map((p) => (
+            <span className="chip preset-chip" key={p.id} title={p.text}>
+              <button
+                type="button"
+                className="preset-send"
+                disabled={sending || targets.length === 0}
+                onClick={() => sendPreset(p)}
+              >
+                {p.text.length > 70 ? `${p.text.slice(0, 70)}…` : p.text}
+              </button>
+              <Button className="chip-x" title="подставить в текст" disabled={sending} onClick={() => setText(p.text)}>
+                ✎
+              </Button>
+              <Button className="chip-x" title="удалить пресет" disabled={sending} onClick={() => void removePreset(p.id)}>
+                ×
+              </Button>
+            </span>
+          ))}
+        </div>
+      )}
       <div className="send-row">
         <input
           ref={fileInput}
@@ -246,6 +326,7 @@ export default function Chat() {
   });
 
   const [showFilters, setShowFilters] = useState(false);
+  const [showSend, setShowSend] = useState(false);
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [cursor, setCursor] = useState<string | null | undefined>(undefined); // undefined: ещё не грузили
@@ -311,7 +392,18 @@ export default function Chat() {
 
   return (
     <Section title="История чата">
-      {canWrite && <BotSendPanel guildId={guildId} />}
+      {canWrite && (
+        <div className="toolbar">
+          <Button
+            className={showSend ? "chip active" : "chip"}
+            icon="pi pi-send"
+            onClick={() => setShowSend((v) => !v)}
+          >
+            {showSend ? "скрыть отправку" : "отправить сообщение"}
+          </Button>
+        </div>
+      )}
+      {canWrite && showSend && <BotSendPanel guildId={guildId} />}
       {available.length === 0 ? (
         <Empty>
           История сообщений ещё не записывается в базу (коллекция chat_messages пуста). Как только бот начнёт её
@@ -441,7 +533,15 @@ export default function Chat() {
               {feed.map((m) => (
                 <div className="chat-message" key={m.messageId} data-deleted={m.deletedAt ? "true" : undefined}>
                   <span className="chat-time">{fmtDate(m.sentAt)}</span>
-                  <strong className="chat-author" title={m.authorUserId}>
+                  <strong
+                    className="chat-author"
+                    title={m.authorUserId}
+                    style={
+                      names.data?.userColors?.[m.authorUserId]
+                        ? { color: names.data.userColors[m.authorUserId] }
+                        : undefined
+                    }
+                  >
                     {nameOf(names.data, "user", m.authorUserId) || m.authorName || m.authorUserId}
                   </strong>
                   <span className="chat-main">

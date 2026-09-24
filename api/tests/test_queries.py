@@ -19,6 +19,7 @@ def _clear_caches() -> None:
     queries._leaderboard_cache.clear()
     queries._invites_cache.clear()
     queries._chat_leaderboard_cache.clear()
+    queries._user_colors_cache.clear()
 
 
 # --- pipeline builders ---
@@ -371,6 +372,38 @@ def test_search_members_converts() -> None:
     assert items == [{"userId": "9", "userName": "Nina"}]
 
 
+def test_known_user_colors_picks_top_colored_role() -> None:
+    db = FakeDB()
+    db[queries.COLL_ROLE_STATE] = FakeCollection(queries.COLL_ROLE_STATE, docs=[
+        {"guildId": "1", "userId": "u1", "roleIds": ["10", "20", "30"]},
+        {"guildId": "1", "userId": "u2", "roleIds": ["10"]},
+        {"guildId": "1", "userId": "u3", "roleIds": []},
+        {"guildId": "1", "userId": "u4", "roleIds": ["99"]},  # роль не из этого сервера
+    ])
+    role_meta = {"10": (0x111111, 1), "20": (0x222222, 5), "30": (0x333333, 3)}
+    colors = queries.known_user_colors(db, "1", role_meta)
+    # u1: позиции 1<5>3 → цвет позиции 5; u2: единственный цветный; u3/u4: без цвета
+    assert colors == {"u1": "#222222", "u2": "#111111"}
+    # кэш по гильдии: тот же результат без повторного запроса
+    colors2 = queries.known_user_colors(db, "1", {})
+    assert colors2 == colors
+    assert len(db[queries.COLL_ROLE_STATE].calls) == 1
+
+
+def test_chat_presets_lists_guild_documents_sorted() -> None:
+    db = FakeDB()
+    db[queries.COLL_CHAT_PRESETS] = FakeCollection(queries.COLL_CHAT_PRESETS, docs=[
+        {"_id": "p2", "guildId": "1", "text": "второй", "createdAt": _dt(2)},
+        {"_id": "p1", "guildId": "1", "text": "первый", "createdAt": _dt(1)},
+        {"_id": "p3", "guildId": "other", "text": "чужая гильдия", "createdAt": _dt(3)},
+    ])
+    items = queries.chat_presets(db, "1")
+    assert items == [
+        {"id": "p1", "text": "первый", "createdAt": "2026-09-01T00:00:00Z"},
+        {"id": "p2", "text": "второй", "createdAt": "2026-09-02T00:00:00Z"},
+    ]
+
+
 def test_ensure_web_indexes_names_and_errors() -> None:
     db = FakeDB()
     db[queries.COLL_PARTICIPANTS] = FakeCollection(queries.COLL_PARTICIPANTS)
@@ -382,6 +415,7 @@ def test_ensure_web_indexes_names_and_errors() -> None:
         "discord_audit_logs.web_disc_audit_guildId_at",
         "discord_audit_logs.web_disc_audit_guildId_entryId",
         "chat_messages.chat_guildId_channelId_sentAt",
+        "chat_presets.chat_presets_guildId_createdAt",
     ]
     assert result["errors"] == ["voice_sessions.web_guildId_status_endedAt: RuntimeError"]
     keys, kw = db[queries.COLL_PARTICIPANTS].calls[0][2], db[queries.COLL_PARTICIPANTS].calls[0][3]

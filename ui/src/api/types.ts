@@ -259,6 +259,18 @@ export type NamesPayload = {
   channels: Record<string, string>;
   roles: Record<string, string>;
   users: Record<string, string>;
+  userColors: Record<string, string>;
+};
+
+export type ChatPreset = {
+  id: string;
+  text: string;
+  createdAt: string | null;
+};
+
+export type ChatPresetPage = {
+  guildId: string;
+  items: ChatPreset[];
 };
 
 export type RoleOption = {

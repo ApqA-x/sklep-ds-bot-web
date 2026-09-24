@@ -32,6 +32,7 @@ def _clear_caches() -> None:
     queries._invites_cache.clear()
     queries._names_cache.clear()
     queries._chat_leaderboard_cache.clear()
+    queries._user_colors_cache.clear()
     from api import discord_api
 
     discord_api._BOT_GUILD_CACHE.clear()
@@ -250,11 +251,35 @@ def test_names_endpoint_without_token_uses_db_users() -> None:
     assert body["users"][USER] == "fresh_nick"  # никнейм перекрывает прошлое userName
     assert body["users"]["160000000000000001"] == "plain"
     assert "x" not in body["users"]
+    # без бот-токена цвета ролей недоступны — цвета пустые, UI рисует ник цветом по умолчанию
+    assert body["userColors"] == {}
 
 
 def test_names_endpoint_validation() -> None:
     client = _client(FakeDB())
     assert client.get("/api/guild/abc/names").status_code == 422
+
+
+def test_names_endpoint_user_colors(monkeypatch) -> None:
+    from api import discord_api
+
+    async def fake_roles_raw(cfg, guild_id):
+        return [
+            {"id": "10", "name": "a", "color": 0x112233, "position": 1},
+            {"id": "20", "name": "b", "color": 0, "position": 9},
+            {"id": "30", "name": "c", "color": 0x445566, "position": 4},
+        ]
+
+    monkeypatch.setattr(discord_api, "guild_roles_raw", fake_roles_raw)
+    db = FakeDB()
+    db[queries.COLL_ROLE_STATE] = FakeCollection(queries.COLL_ROLE_STATE, docs=[
+        {"guildId": GUILD, "userId": USER, "roleIds": ["10", "20", "30"]},
+        {"guildId": GUILD, "userId": "160000000000000001", "roleIds": ["20"]},
+    ])
+    client = _client(db)
+    body = client.get(f"/api/guild/{GUILD}/names").json()
+    # u1: цветные роли 10(pos1) и 30(pos4) → берётся 30; u2: только безцветная роль
+    assert body["userColors"] == {USER: "#445566"}
 
 
 def test_picker_endpoint_without_token_returns_empty_lists() -> None:

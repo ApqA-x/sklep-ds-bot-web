@@ -257,7 +257,7 @@ button:disabled {
   gap: 1.1rem;
   border-bottom: none;
 }
-.send-tabs .p-tabview-nav-item {
+.send-tabs .p-tabview-nav > li {
   margin: 0;
 }
 .send-tabs .p-tabview-nav-link {
@@ -280,8 +280,9 @@ button:disabled {
   color: var(--text);
   background: var(--surface2);
 }
-.send-tabs .p-tabview-nav-item.p-highlight .p-tabview-nav-link,
-.send-tabs .p-tabview-nav-item.p-highlight .p-tabview-nav-link:hover {
+/* выбранная вкладка: li получает классы p-tabview-selected p-highlight */
+.send-tabs li.p-highlight .p-tabview-nav-link,
+.send-tabs li.p-highlight .p-tabview-nav-link:hover {
   background: var(--pink);
   border-color: var(--pink);
   color: var(--crust);

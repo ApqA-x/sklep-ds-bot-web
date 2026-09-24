@@ -230,11 +230,78 @@ button:disabled {
   margin-bottom: 0.9rem;
 }
 .send-tabs > .p-tabview-panels {
-  padding: 0.6rem 0 0;
+  padding: 0.9rem 0 0;
   background: transparent;
 }
 .send-tabs .send-panel {
   margin-bottom: 0;
+}
+.send-tabs .p-tabview-nav {
+  display: flex;
+  gap: 1.1rem;
+  border-bottom: none;
+}
+.send-tabs .p-tabview-nav-item {
+  margin: 0;
+}
+.send-tabs .p-tabview-nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.45rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface1);
+  color: var(--subtext1);
+  font: inherit;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    border-color 0.15s ease;
+}
+.send-tabs .p-tabview-nav-link:hover {
+  border-color: var(--mauve);
+  color: var(--text);
+  background: var(--surface2);
+}
+.send-tabs .p-tabview-nav-item.p-highlight .p-tabview-nav-link,
+.send-tabs .p-tabview-nav-item.p-highlight .p-tabview-nav-link:hover {
+  background: color-mix(in srgb, var(--mauve) 22%, var(--mantle));
+  border-color: var(--mauve);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* обложка редактора блока: поля отделены от каналов/пресетов/кнопки отправки */
+.embed-form-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.8rem 0.9rem;
+  border: 1px solid var(--surface2);
+  border-radius: 12px;
+  background: var(--surface0);
+}
+.embed-form-head {
+  color: var(--subtext1);
+  font-size: 0.9rem;
+}
+.embed-form-head strong {
+  color: var(--text);
+}
+/* красная подсветка того, что не даётся заполнить/выбрать */
+.field-error .p-inputtext,
+.field-error .p-inputtextarea,
+.field-error .p-multiselect,
+.field-error .embed-form-card {
+  border-color: var(--red) !important;
+}
+.send-row.field-error .p-multiselect,
+.send-row.field-error .p-multiselect-label {
+  border-color: var(--red) !important;
+}
+.embed-form-card.field-error {
+  border-color: var(--red) !important;
 }
 
 /* конструктор embed-блока */
@@ -279,12 +346,20 @@ button:disabled {
   color: var(--text);
 }
 .embed-preview-card {
-  background: var(--surface0);
+  background: var(--mantle);
   border-left: 4px solid var(--mauve);
   border-radius: 6px;
   padding: 0.6rem 0.8rem;
   color: var(--text);
   overflow: hidden;
+}
+.embed-audit-card {
+  margin: 0.35rem 0;
+  background: var(--mantle);
+  border-left: 4px solid var(--mauve);
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.85rem;
 }
 .embed-author {
   display: flex;
@@ -870,6 +945,29 @@ pre.inline {
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 0.35rem;
   margin-top: 0.4rem;
+}
+
+/* строка типа активности: чекбокс + палитра цвета карточки */
+.event-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.event-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.event-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  flex: none;
+}
+.event-color .p-colorpicker-preview {
+  width: 1.7rem;
+  height: 1.7rem;
+  padding: 0;
 }
 
 .category-grid {

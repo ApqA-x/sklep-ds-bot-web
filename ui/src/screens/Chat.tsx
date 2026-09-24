@@ -371,6 +371,35 @@ function intToHex(value: number): string {
   return `#${(value & 0xffffff).toString(16).padStart(6, "0")}`;
 }
 
+// ColorPicker (format=hex) отдаёт значение БЕЗ "#" (ff0000) — нормализуем к "#ff0000"
+function normalizeHexColor(value: unknown): string {
+  const raw = String(value ?? "").trim().toLowerCase();
+  if (raw === "") return "#000000";
+  return raw.startsWith("#") ? raw : `#${raw}`;
+}
+
+function hexToInt(hex: string): number | null {
+  const clean = hex.replace(/^#/, "");
+  if (!/^[0-9a-f]{6}$/i.test(clean)) return null;
+  return parseInt(clean, 16);
+}
+
+// 422 от сервера -> поле, которое нужно подсветить
+function fieldOfApiError(message: string): string | null {
+  const m = message.toLowerCase();
+  if (m.includes("title")) return "title";
+  if (m.includes("description")) return "description";
+  if (m.includes("author")) return "authorName";
+  if (m.includes("footer")) return "footerText";
+  if (m.includes("color")) return "color";
+  if (m.includes("channel")) return "targets";
+  if (m.includes("embed is empty") || m.includes("content or embed")) return "content";
+  if (m.includes("6000")) return "content";
+  if (m.includes("attachment")) return "files";
+  if (m.includes("content")) return "caption";
+  return null;
+}
+
 function EmbedPreview({ form, slots }: { form: typeof EMPTY_EMBED_FORM; slots: Record<EmbedSlot, ImageRef | null> }) {
   return (
     <div className="embed-preview-card" style={{ borderLeftColor: form.color || "#000000" }}>
@@ -408,6 +437,8 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
     footerIcon: null,
   });
   const [embedError, setEmbedError] = useState<string | null>(null);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [errFields, setErrFields] = useState<Set<string>>(new Set());
   const [presetError, setPresetError] = useState<string | null>(null);
   const [presetName, setPresetName] = useState("");
   const [sending, setSending] = useState(false);
@@ -441,14 +472,22 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
   const set = (patch: Partial<typeof EMPTY_EMBED_FORM>) => {
     setForm((f) => ({ ...f, ...patch }));
     setArmed(false);
+    setErrFields(new Set());
+    setSendError(null);
   };
+
+  const markError = (fields: string[], message: string) => {
+    setErrFields(new Set(fields));
+    setSendError(message);
+  };
+
+  const ef = (name: string) => (errFields.has(name) ? "embed-field field-error" : "embed-field");
 
   const hasAnyImage = Object.values(slots).some(Boolean);
   const hasAnyText = Boolean(
     form.title.trim() || form.description.trim() || form.authorName.trim() || form.footerText.trim(),
   );
   const hasContent = hasAnyImage || hasAnyText;
-  const ready = !sending && hasContent && targets.length > 0;
   const needsConfirm = targets.length > 1;
 
   const attachFile = (slot: EmbedSlot, incoming: File | null) => {
@@ -487,7 +526,7 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
   };
 
   const specFor = (withFiles: boolean): EmbedSpec => {
-    const color = parseInt(form.color.slice(1), 16) || null;
+    const color = hexToInt(form.color);
     const spec: EmbedSpec = {
       title: form.title.trim() || null,
       description: form.description.trim() || null,
@@ -505,12 +544,24 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
   };
 
   const send = async () => {
-    if (!ready) return;
+    if (sending) return;
+    const missing: string[] = [];
+    if (targets.length === 0) missing.push("targets");
+    if (!hasContent) missing.push("content");
+    if (missing.length > 0) {
+      const messages: string[] = [];
+      if (targets.length === 0) messages.push("не выбран канал для отправки");
+      if (!hasContent) messages.push("блок пуст: заполни хотя бы одно поле или приложи картинку");
+      markError(missing, messages.join("; "));
+      return;
+    }
     if (needsConfirm && !armed) {
       setArmed(true);
       return;
     }
     setArmed(false);
+    setErrFields(new Set());
+    setSendError(null);
     setSending(true);
     setResults([]);
     const spec = specFor(true);
@@ -524,7 +575,11 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
         await api.botMessage(guildId, channelId, caption, files, spec);
         out.push({ channelId, ok: true });
       } catch (err) {
-        out.push({ channelId, ok: false, error: err instanceof Error ? err.message : String(err) });
+        const message = err instanceof Error ? err.message : String(err);
+        out.push({ channelId, ok: false, error: message });
+        const field = fieldOfApiError(message);
+        setErrFields(new Set(field ? [field] : []));
+        setSendError(message);
       }
       setResults([...out]);
       await new Promise((r) => setTimeout(r, SEND_PAUSE_MS));
@@ -571,7 +626,7 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
 
   return (
     <div className="send-panel">
-      <div className="send-row">
+      <div className={errFields.has("targets") ? "send-row field-error" : "send-row"}>
         <MultiSelect
           className="send-targets"
           value={targets}
@@ -581,6 +636,12 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
           onChange={(e) => {
             setTargets((e.value as string[]) ?? []);
             setArmed(false);
+            setErrFields((prev) => {
+              if (!prev.has("targets")) return prev;
+              const next = new Set(prev);
+              next.delete("targets");
+              return next;
+            });
           }}
           placeholder="каналы для отправки"
           selectedItemsLabel="выбрано: {0}"
@@ -591,10 +652,14 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
         />
         <span className="muted tiny">живые текстовые каналы сервера</span>
       </div>
-      <div className="embed-grid">
+      <div className={errFields.has("content") || errFields.has("files") ? "embed-form-card field-error" : "embed-form-card"}>
+        <div className="embed-form-head">
+          Блок (embed) — <strong>все поля необязательны</strong>, но должно быть заполнено хотя бы одно
+        </div>
+        <div className="embed-grid">
         <div className="embed-fields">
-          <div className="embed-field">
-            <h4>Title</h4>
+          <div className={ef("title")}>
+            <h4>Title <span className="muted tiny">— необязательно</span></h4>
             <InputText
               value={form.title}
               maxLength={256}
@@ -603,8 +668,8 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
               onChange={(e) => set({ title: String(e.target.value ?? "") })}
             />
           </div>
-          <div className="embed-field">
-            <h4>Description</h4>
+          <div className={ef("description")}>
+            <h4>Description <span className="muted tiny">— необязательно</span></h4>
             <InputTextarea
               rows={4}
               value={form.description}
@@ -614,21 +679,21 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
               onChange={(e) => set({ description: String(e.target.value ?? "") })}
             />
           </div>
-          <div className="embed-field">
-            <h4>Color</h4>
+          <div className={ef("color")}>
+            <h4>Color <span className="muted tiny">— необязательно</span></h4>
             <div className="embed-file-row">
               <ColorPicker
                 value={form.color}
                 format="hex"
                 disabled={sending}
-                onChange={(e) => set({ color: String(e.value ?? "#000000") })}
+                onChange={(e) => set({ color: normalizeHexColor(e.value) })}
               />
               <span className="muted tiny">{form.color.toUpperCase()} (по умолчанию чёрный)</span>
             </div>
           </div>
           {(["thumbnail", "image"] as EmbedSlot[]).map((slot) => (
-            <div className="embed-field" key={slot}>
-              <h4>{SLOT_LABELS[slot]}</h4>
+            <div className={ef("files")} key={slot}>
+              <h4>{SLOT_LABELS[slot]} <span className="muted tiny">— необязательно</span></h4>
               <div className="embed-file-row">
                 <input
                   ref={(el) => {
@@ -656,8 +721,8 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
               </div>
             </div>
           ))}
-          <div className="embed-field">
-            <h4>Author</h4>
+          <div className={ef("authorName")}>
+            <h4>Author <span className="muted tiny">— необязательно</span></h4>
             <div className="embed-file-row">
               <InputText
                 value={form.authorName}
@@ -688,8 +753,8 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
               )}
             </div>
           </div>
-          <div className="embed-field">
-            <h4>Footer</h4>
+          <div className={ef("footerText")}>
+            <h4>Footer <span className="muted tiny">— необязательно</span></h4>
             <div className="embed-file-row">
               <InputText
                 value={form.footerText}
@@ -720,8 +785,8 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
               )}
             </div>
           </div>
-          <div className="embed-field">
-            <h4>Подпись (необязательно)</h4>
+          <div className={ef("caption")}>
+            <h4>Подпись <span className="muted tiny">— необязательно</span></h4>
             <InputTextarea
               rows={2}
               value={form.caption}
@@ -744,7 +809,9 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
           )}
         </div>
       </div>
+      </div>
       {embedError && <p className="hint danger">{embedError}</p>}
+      {sendError && <p className="hint danger">{sendError}</p>}
       <div className="preset-row">
         <InputText
           value={presetName}
@@ -793,7 +860,7 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
         </div>
       )}
       <div className="send-row">
-        <Button disabled={!ready} loading={sending} onClick={() => void send()}>
+        <Button disabled={sending} loading={sending} onClick={() => void send()}>
           {sending ? "отправка…" : armed ? `подтвердить отправку (${targets.length} каналов)` : "отправить блок"}
         </Button>
         {needsConfirm && !armed && !sending && <span className="muted tiny">отправка попросит подтверждение</span>}

@@ -285,6 +285,32 @@ function CommandCall({ item }: { item: AuditItem }) {
   );
 }
 
+// карточка отправленного embed-блока в журнале — как предпросмотр на экране «Чат»,
+// но без картинок: во вложении живой файл, в аудите остаётся только его имя
+function EmbedAuditCard({ embed }: { embed: Record<string, unknown> }) {
+  const color = typeof embed.color === "number" ? `#${(embed.color & 0xffffff).toString(16).padStart(6, "0")}` : "#000000";
+  const title = typeof embed.title === "string" ? embed.title : null;
+  const description = typeof embed.description === "string" ? embed.description : null;
+  const author = typeof embed.author === "string" ? embed.author : null;
+  const footer = typeof embed.footer === "string" ? embed.footer : null;
+  const image = typeof embed.image === "string" ? embed.image : null;
+  const thumbnail = typeof embed.thumbnail === "string" ? embed.thumbnail : null;
+  return (
+    <div className="embed-audit-card" style={{ borderLeftColor: color }}>
+      {author && <div className="embed-author">{author}</div>}
+      {title && <div className="embed-title">{title}</div>}
+      {description && <div className="embed-description">{description}</div>}
+      {(image || thumbnail) && (
+        <div className="muted tiny">
+          {image && <>вложение: {image}  </>}
+          {thumbnail && <>миниатюра: {thumbnail}</>}
+        </div>
+      )}
+      {footer && <div className="embed-footer">{footer}</div>}
+    </div>
+  );
+}
+
 // одно предложение на запись; неизвестные действия — читаемый фолбэк
 export function AuditDetails({ item }: { item: AuditItem }) {
   if (item.action.startsWith("command.")) {
@@ -344,33 +370,7 @@ export function AuditDetails({ item }: { item: AuditItem }) {
                 чат: <Channel id={String(after.channelId)} />{" "}
                 <span className="muted tiny">({String(after.channelId)})</span>
               </div>
-              {embed && (
-                <div>
-                  блок:{" "}
-                  {typeof embed.title === "string" && `заголовок: ${embed.title}; `}
-                  {typeof embed.description === "string" && `описание: ${embed.description}; `}
-                  {typeof embed.author === "string" && `автор: ${embed.author}; `}
-                  {typeof embed.footer === "string" && `футер: ${embed.footer}; `}
-                  {typeof embed.image === "string" && `картинка: ${embed.image}; `}
-                  {typeof embed.thumbnail === "string" && `миниатюра: ${embed.thumbnail}; `}
-                  {typeof embed.color === "number" && (
-                    <>
-                      цвет:{" "}
-                      <span
-                        style={{
-                          display: "inline-block",
-                          width: "0.8em",
-                          height: "0.8em",
-                          background: `#${(embed.color & 0xffffff).toString(16).padStart(6, "0")}`,
-                          border: "1px solid var(--border)",
-                          borderRadius: 2,
-                          verticalAlign: "middle",
-                        }}
-                      />
-                    </>
-                  )}
-                </div>
-              )}
+              {embed && <EmbedAuditCard embed={embed} />}
               <div>
                 текст ({String(after.length)} симв.):
                 {content !== null ? (

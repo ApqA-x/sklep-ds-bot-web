@@ -45,6 +45,7 @@ class WebConfig:
     discord_redirect_uri: str = ""
     web_session_secret: str = ""
     web_public_url: str = ""
+    session_max_age_hours: int = 8
     media_dir: str = ""
     log_level: str = "INFO"
     warnings: list[str] = field(default_factory=list)
@@ -160,6 +161,15 @@ def load_config(env: Any = None, *, validate: bool = True) -> WebConfig:
         cfg.web_port = int(_get(source, "WEB_PORT", "8000"))
     except ValueError:
         cfg.web_port = 8000
+    raw_age = _get(source, "WEB_SESSION_MAX_AGE_HOURS", "8")
+    try:
+        cfg.session_max_age_hours = int(raw_age)
+    except ValueError:
+        if cfg.is_production:
+            raise ConfigError("WEB_SESSION_MAX_AGE_HOURS must be an integer number of hours")
+        cfg.session_max_age_hours = 8
+    if not 1 <= cfg.session_max_age_hours <= 24:
+        raise ConfigError("WEB_SESSION_MAX_AGE_HOURS must be between 1 and 24")
     if validate:
         validate_config(cfg)
     return cfg

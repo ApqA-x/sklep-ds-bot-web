@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate, useParams, Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "primereact/button";
 import { ConfirmDialog } from "primereact/confirmdialog";
 import { api } from "./api/client";
@@ -10,6 +10,7 @@ export default function Layout() {
   const { guildId } = useParams<{ guildId: string }>();
   const { guildId: selectedGuild } = useGuild();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const whoami = useQuery({ queryKey: ["whoami"], queryFn: api.whoami });
   const me = whoami.data;
   const names = useNames(guildId);
@@ -52,6 +53,7 @@ export default function Layout() {
               label="выход"
               onClick={async () => {
                 await api.logout();
+                queryClient.clear();
                 navigate("/");
               }}
             />

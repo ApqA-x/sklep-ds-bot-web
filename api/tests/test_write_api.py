@@ -551,12 +551,14 @@ def logged_in_manager(monkeypatch: pytest.MonkeyPatch) -> dict:
     async def fake_user_guilds(access_token):
         return {"id": USER, "username": "boss"}, state["guilds"]
 
-    async def fake_member_permissions(cfg, guild_id, user_id):
-        return None
+    async def fake_resolve_permissions(cfg, guild_id, user_id):
+        if guild_id == GUILD:
+            return ("allowed", MANAGE)  # Manage Guild, not Administrator
+        return ("denied", 0)
 
     monkeypatch.setattr(discord_api, "oauth_token", fake_token)
     monkeypatch.setattr(discord_api, "oauth_user_guilds", fake_user_guilds)
-    monkeypatch.setattr(discord_api, "member_permissions", fake_member_permissions)
+    monkeypatch.setattr(discord_api, "resolve_permissions", fake_resolve_permissions)
     return state
 
 
@@ -569,7 +571,7 @@ def _login(client: TestClient, state: dict, perms: dict) -> None:
     client.get(f"/api/auth/callback?code=abc&state={oauth_state}")
 
 
-def test_manager_can_read_but_not_write(logged_in_manager: dict) -> None:
+def test_manager_denied_entirely_after_d02(logged_in_manager: dict) -> None:
     auth_module._clear_recheck_cache()
     cfg = WebConfig(
         mongo_uri="",
@@ -582,6 +584,9 @@ def test_manager_can_read_but_not_write(logged_in_manager: dict) -> None:
     )
     client = TestClient(create_app(config=cfg, db=_settings_db()), base_url="https://testserver", follow_redirects=False)
     _login(client, logged_in_manager, {GUILD: MANAGE})
-    assert client.get(f"/api/guild/{GUILD}/leaderboard").status_code == 200
+    # D02 (T03): Manage Guild without Administrator is no panel access at all —
+    # reads are closed too, not just writes.
+    assert client.get(f"/api/guild/{GUILD}/leaderboard").status_code == 403
+    assert client.get(f"/api/guild/{GUILD}/audit").status_code == 403
     assert client.patch(f"/api/guild/{GUILD}/settings", json={"trackingMode": "none"}).status_code == 403
     assert client.post(f"/api/guild/{GUILD}/trusted", json={"userId": USER, "action": "add"}).status_code == 403

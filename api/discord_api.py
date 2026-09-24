@@ -393,19 +393,97 @@ async def get_member(cfg: WebConfig, guild_id: str, user_id: str) -> dict[str, A
 
 
 async def member_permissions(cfg: WebConfig, guild_id: str, user_id: str) -> int | None:
-    """Computed permissions bitfield of a member via bot token, or None if not a member."""
+    """Computed permissions bitfield of a member via bot token, or None if not a member.
+
+    Kept for callers that tolerate tri-state None; auth gates must use
+    resolve_permissions(), which separates "denied" from "unknown".
+    """
+    try:
+        status, perms = await resolve_permissions(cfg, guild_id, user_id)
+    except PermissionUnavailable:
+        raise
+    return perms if status == "allowed" else None
+
+
+ADMINISTRATOR = 1 << 3
+
+# guild_id -> (monotonic_ts, {"owner_id": str, "everyone": int, "roles": {id: perms}})
+_PERM_CONTEXT_CACHE: dict[str, tuple[float, dict[str, object]]] = {}
+_PERM_CONTEXT_TTL = 60.0
+
+
+class PermissionUnavailable(RuntimeError):
+    """Fresh membership/role state could not be determined; callers must not allow."""
+
+
+class _GuildGone(Exception):
+    pass
+
+
+async def _perm_context(cfg: WebConfig, guild_id: str) -> dict[str, object]:
+    cached = _PERM_CONTEXT_CACHE.get(guild_id)
+    if cached is not None and time.monotonic() - cached[0] < _PERM_CONTEXT_TTL:
+        return cached[1]
     if not cfg.discord_token:
-        return None
+        raise PermissionUnavailable("bot token not configured")
+    headers = {"Authorization": f"Bot {cfg.discord_token}"}
+    try:
+        guild = await _get_json(f"{API}/guilds/{guild_id}", headers, op="perm_guild")
+    except DiscordError as err:
+        if err.status == 404:
+            raise _GuildGone(guild_id) from err
+        raise PermissionUnavailable(f"guild lookup failed: {err}") from err
+    except aiohttp.ClientError as err:
+        raise PermissionUnavailable(f"guild lookup network error: {err}") from err
+    try:
+        rows = await _get_json(f"{API}/guilds/{guild_id}/roles", headers, op="perm_roles") or []
+    except DiscordError as err:
+        raise PermissionUnavailable(f"role lookup failed: {err}") from err
+    except aiohttp.ClientError as err:
+        raise PermissionUnavailable(f"role lookup network error: {err}") from err
+    everyone = 0
+    roles: dict[str, int] = {}
+    for row in rows:
+        rid = str(row.get("id") or "")
+        try:
+            bits = int(row.get("permissions") or 0)
+        except (TypeError, ValueError):
+            bits = 0
+        if rid == guild_id:
+            everyone = bits
+        elif rid:
+            roles[rid] = bits
+    ctx = {"owner_id": str(guild.get("owner_id") or ""), "everyone": everyone, "roles": roles}
+    _PERM_CONTEXT_CACHE[guild_id] = (time.monotonic(), ctx)
+    return ctx
+
+
+async def resolve_permissions(cfg: WebConfig, guild_id: str, user_id: str) -> tuple[str, int]:
+    """Current guild permissions of a user, computed from owner flag and roles.
+
+    Returns ("allowed", bitfield) or ("denied", 0). Raises PermissionUnavailable
+    when Discord could not be consulted (timeout/429/5xx/bot access) — the caller
+    must surface 503, never fall back to an older grant.
+    """
+    try:
+        ctx = await _perm_context(cfg, guild_id)
+    except _GuildGone:
+        return ("denied", 0)
+    if ctx["owner_id"] == user_id:
+        return ("allowed", ADMINISTRATOR)
     headers = {"Authorization": f"Bot {cfg.discord_token}"}
     try:
         member = await _get_json(
-            f"{API}/guilds/{guild_id}/members/{user_id}", headers, op="member"
+            f"{API}/guilds/{guild_id}/members/{user_id}", headers, op="perm_member"
         )
     except DiscordError as err:
         if err.status == 404:
-            return None
-        raise
-    raw = member.get("permissions")
-    if raw is None:
-        return None
-    return int(raw)
+            return ("denied", 0)
+        raise PermissionUnavailable(f"member lookup failed: {err}") from err
+    except aiohttp.ClientError as err:
+        raise PermissionUnavailable(f"member lookup network error: {err}") from err
+    roles = ctx["roles"]  # type: ignore[index]
+    perms = int(ctx["everyone"])  # type: ignore[arg-type]
+    for rid in member.get("roles") or []:
+        perms |= roles.get(str(rid), 0)
+    return ("allowed", perms)

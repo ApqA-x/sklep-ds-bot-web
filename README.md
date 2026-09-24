@@ -97,7 +97,7 @@ workflow `publish.yml` соберёт `ghcr.io/apqa-x/sklep-ds-bot-web:0.1.0` (+
 | 0. Каркас | ✅ |
 | 1. Read API | ✅ (`api/queries.py`, `api/read.py`, web-индексы `web_*` при старте) |
 | 2. SPA v1 | ✅ (роутинг, Leaderboard/Active/Sessions/User/Invites, recharts) |
-| 3. OAuth + права | ✅ (`api/auth.py`, `api/discord_api.py`, read-гейт Manage Guild, dev-mode без env) |
+| 3. OAuth + права | ✅ (`api/auth.py`, `api/discord_api.py`, политика панели: владелец сервера / Administrator по ЖИВОЙ проверке Discord (кэш 60 с), абсолютный срок сессии `WEB_SESSION_MAX_AGE_HOURS`, dev-mode только при явном `WEB_ENV`) |
 | 4. Write-слой | ✅ (`api/models.py`, `api/mutations.py`, `api/write.py`, `web_audit_logs`, конфликт `expectedUpdatedAt`) |
 | 5. Discord-действия | ✅ (`api/bot.py`: роли/timeout/move/kick/сообщение (текст + multipart-вложения)/инвайты, rate-limit, audit) |
 | 6. UI управления | ✅ (форма настроек, списки trusted/autoUnmute/stalker, панель действий, страница аудита) |

@@ -38,21 +38,24 @@ def record_audit(
     after: Any = None,
     ok: bool = True,
     origin: str = "web",
+    operation_id: str | None = None,
 ) -> None:
-    db[COLL_AUDIT].insert_one(
-        {
-            "guildId": guild_id,
-            "actorUserId": actor.get("userId", ""),
-            "actorName": actor.get("userName", ""),
-            "action": action,
-            "before": _jsonable(before),
-            "after": _jsonable(after),
-            "ok": ok,
-            "at": _utc_now(),
-            "source": "web",
-            "origin": origin,
-        }
-    )
+    entry = {
+        "guildId": guild_id,
+        "actorUserId": actor.get("userId", ""),
+        "actorName": actor.get("userName", ""),
+        "action": action,
+        "before": _jsonable(before),
+        "after": _jsonable(after),
+        "ok": ok,
+        "at": _utc_now(),
+        "source": "web",
+        "origin": origin,
+    }
+    if operation_id:
+        # T08.10: audit — проекция фактов operations; старые записи без поля совместимы
+        entry["operationId"] = operation_id
+    db[COLL_AUDIT].insert_one(entry)
 
 
 def patch_guild_settings(

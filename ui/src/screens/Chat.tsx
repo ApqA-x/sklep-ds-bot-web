@@ -8,7 +8,7 @@ import { InputTextarea } from "primereact/inputtextarea";
 import { InputText } from "primereact/inputtext";
 import { TabView, TabPanel } from "primereact/tabview";
 import { ColorPicker } from "primereact/colorpicker";
-import { api, useCanWrite } from "../api/client";
+import { api, newOperationKey, useCanWrite } from "../api/client";
 import type { ChatAttachment, ChatMessage, ChatPreset, EmbedSpec } from "../api/types";
 import { TargetUserPicker } from "../components/userSearch";
 import { DateField } from "../components/dateField";
@@ -141,9 +141,10 @@ function BotSendPanel({ guildId }: { guildId: string }) {
     setSending(true);
     setResults([]);
     const out: SendResult[] = [];
+    const batchId = newOperationKey();
     for (const channelId of channels) {
       try {
-        await api.botMessage(guildId, channelId, body, attach);
+        await api.botMessage(guildId, channelId, body, attach, null, { batchId });
         out.push({ channelId, ok: true });
       } catch (err) {
         out.push({ channelId, ok: false, error: err instanceof Error ? err.message : String(err) });
@@ -572,9 +573,10 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
       .map((r) => (r.file.name === r.name ? r.file : new File([r.file], r.name, { type: r.file.type })));
     const caption = form.caption.trim();
     const out: SendResult[] = [];
+    const batchId = newOperationKey();
     for (const channelId of targets) {
       try {
-        await api.botMessage(guildId, channelId, caption, files, spec);
+        await api.botMessage(guildId, channelId, caption, files, spec, { batchId });
         out.push({ channelId, ok: true });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

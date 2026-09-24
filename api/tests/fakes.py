@@ -107,6 +107,13 @@ class FakeUpdateResult:
         self.upserted_id = upserted_id
 
 
+class DuplicateKeyError(Exception):
+    """Локальный аналог pymongo.errors.DuplicateKeyError — имя класса и code 11000
+    распознаются operations._is_duplicate."""
+
+    code = 11000
+
+
 class FakeCollection:
     def __init__(
         self,
@@ -114,11 +121,13 @@ class FakeCollection:
         docs: list[dict] | None = None,
         aggregate_results: list[list[dict]] | None = None,
         fail_create_index: bool = False,
+        fail_insert: bool = False,
     ) -> None:
         self.name = name
         self.docs = list(docs or [])
         self.aggregate_results = list(aggregate_results or [])
         self.fail_create_index = fail_create_index
+        self.fail_insert = fail_insert
         self.calls: list[tuple] = []
 
     def find(self, flt: dict | None = None, projection: Any = None, *, sort: Any = None, skip: int = 0, limit: int = 0, **kw):
@@ -195,6 +204,11 @@ class FakeCollection:
 
     def insert_one(self, doc: dict, **kw):
         self.calls.append(("insert_one", self.name, doc))
+        if self.fail_insert:
+            raise RuntimeError("insert failed")
+        # как в Mongo: повторный _id — DuplicateKeyError (unique-семантика _id, T08/O02)
+        if doc.get("_id") is not None and any(d.get("_id") == doc["_id"] for d in self.docs):
+            raise DuplicateKeyError(f"E11000 duplicate key error on _id={doc['_id']!r}")
         self.docs.append(dict(doc))
         return FakeUpdateResult(0, 0, upserted_id=doc.get("_id"))
 

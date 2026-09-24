@@ -416,6 +416,9 @@ def test_ensure_web_indexes_names_and_errors() -> None:
         "discord_audit_logs.web_disc_audit_guildId_entryId",
         "chat_messages.chat_guildId_channelId_sentAt",
         "chat_presets.chat_presets_guildId_createdAt",
+        # T08: журнал операций (batch-выборка и лента по гильдии)
+        "operations.web_operations_guildId_batchId",
+        "operations.web_operations_guildId_createdAt",
     ]
     assert result["errors"] == ["voice_sessions.web_guildId_status_endedAt: RuntimeError"]
     keys, kw = db[queries.COLL_PARTICIPANTS].calls[0][2], db[queries.COLL_PARTICIPANTS].calls[0][3]

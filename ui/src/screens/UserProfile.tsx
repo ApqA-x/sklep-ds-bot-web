@@ -14,10 +14,10 @@ import {
   YAxis,
 } from "recharts";
 import { api, useCanWrite } from "../api/client";
-import type { Period } from "../api/types";
+import { PERIOD_LABELS, type Period } from "../api/types";
 import { Grid } from "../components/charts";
 import { Empty, ErrorBox, Loading, OptionSelect, roleColorCss, Section, type PickerOption } from "../components/ui";
-import { discordUserUrl, fmtDate, fmtDuration } from "../lib/format";
+import { discordUserUrl, fmtDate, fmtDayRu, fmtDuration } from "../lib/format";
 import { DName, useMemberState, usePicker } from "../names";
 
 const PERIODS: Period[] = ["7d", "30d", "all"];
@@ -38,7 +38,7 @@ function accentHex(value: number | null | undefined): string | null {
 export default function UserProfile() {
   const { guildId = "", userId = "" } = useParams();
   const canWrite = useCanWrite(guildId);
-  const [period, setPeriod] = useState<Period>("30d");
+  const [period, setPeriod] = useState<Period>("all");
   const [chartKind, setChartKind] = useState<ChartKind>("hours");
   const query = useQuery({
     queryKey: ["user", guildId, userId, period],
@@ -79,10 +79,10 @@ export default function UserProfile() {
   const displayName = c?.nick || c?.globalName || p.userName;
   const chartData =
     chartKind === "hours"
-      ? p.daily.map((d) => ({ date: d.date.slice(5), value: Math.round((d.ms / 3_600_000) * 100) / 100 }))
+      ? p.daily.map((d) => ({ date: d.date, value: Math.round((d.ms / 3_600_000) * 100) / 100 }))
       : chartKind === "messages"
-        ? p.dailyMessages.map((d) => ({ date: d.date.slice(5), value: d.count }))
-        : p.dailyInvites.map((d) => ({ date: d.date.slice(5), value: d.count }));
+        ? p.dailyMessages.map((d) => ({ date: d.date, value: d.count }))
+        : p.dailyInvites.map((d) => ({ date: d.date, value: d.count }));
   const byPosition = new Map((picker.data?.roles ?? []).map((r) => [r.id, r.position]));
   const orderedRoles = [...roleIds].sort((a, b) => (byPosition.get(b) ?? -1) - (byPosition.get(a) ?? -1));
 
@@ -92,7 +92,7 @@ export default function UserProfile() {
         <SelectButton
           className="chip-group"
           value={period}
-          options={PERIODS.map((x) => ({ label: x, value: x }))}
+          options={PERIODS.map((x) => ({ label: PERIOD_LABELS[x], value: x }))}
           optionValue="value"
           onChange={(e) => setPeriod(e.value as Period)}
         />
@@ -142,11 +142,12 @@ export default function UserProfile() {
           <a href={discordUserUrl(p.userId)} target="_blank" rel="noreferrer">
             {p.userId}
           </a>{" "}
-          · заходов за период: {p.appearances} · время: {fmtDuration(p.totalMs)} · сообщений:{" "}
-          {p.messageCount.toLocaleString("ru-RU")} · пригласил: {p.invitedCount}
+          · период «{PERIOD_LABELS[period]}»: заходов {p.appearances} · время {fmtDuration(p.totalMs)} ·
+          сообщений{" "}
+          {p.messageCount.toLocaleString("ru-RU")} · пригласил {p.invitedCount}
         </p>
       </Section>
-      <Section title="Активность">
+      <Section title={`Активность · период «${PERIOD_LABELS[period]}»`}>
         <div className="toolbar">
           <SelectButton
             className="chip-group"
@@ -161,9 +162,9 @@ export default function UserProfile() {
             <ResponsiveContainer width="100%" height={220}>
               <LineChart data={chartData}>
                 <Grid />
-                <XAxis dataKey="date" />
+                <XAxis dataKey="date" tickFormatter={(v: string) => v.slice(5)} />
                 <YAxis />
-                <Tooltip />
+                <Tooltip labelFormatter={(v) => fmtDayRu(String(v))} />
                 <Line type="monotone" dataKey="value" stroke="#cba6f7" dot={false} />
               </LineChart>
             </ResponsiveContainer>

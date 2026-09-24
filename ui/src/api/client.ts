@@ -93,14 +93,14 @@ export const api = {
 
   guilds: () => apiGet<{ guilds: GuildAccess[] }>("/api/guilds"),
 
-  leaderboard: (guildId: string, period: Period, limit = 50, page = 1) =>
+  leaderboard: (guildId: string, period: Period, limit = 50, page = 1, q = "") =>
     apiGet<Leaderboard>(
-      `/api/guild/${guildId}/leaderboard?period=${period}&limit=${limit}&page=${page}`,
+      `/api/guild/${guildId}/leaderboard?period=${period}&limit=${limit}&page=${page}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
     ),
 
-  chatLeaderboard: (guildId: string, period: Period, limit = 50, page = 1) =>
+  chatLeaderboard: (guildId: string, period: Period, limit = 50, page = 1, q = "") =>
     apiGet<ChatLeaderboard>(
-      `/api/guild/${guildId}/chat-leaderboard?period=${period}&limit=${limit}&page=${page}`,
+      `/api/guild/${guildId}/chat-leaderboard?period=${period}&limit=${limit}&page=${page}${q ? `&q=${encodeURIComponent(q)}` : ""}`,
     ),
 
   activeSessions: (guildId: string) =>

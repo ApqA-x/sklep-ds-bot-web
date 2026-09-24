@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useEffect, useDeferredValue, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Button } from "primereact/button";
+import { InputText } from "primereact/inputtext";
 import { SelectButton } from "primereact/selectbutton";
 import {
   Bar,
@@ -12,7 +13,7 @@ import {
   YAxis,
 } from "recharts";
 import { api } from "../api/client";
-import type { Period } from "../api/types";
+import { PERIOD_LABELS, type Period } from "../api/types";
 import { ChartControls, Grid, useGridPref } from "../components/charts";
 import { ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDuration, toHours } from "../lib/format";
@@ -34,7 +35,9 @@ const BOARDS: { key: Board; label: string }[] = [
 export default function Leaderboard() {
   const { guildId = "" } = useParams();
   const [board, setBoard] = useState<Board>("voice");
-  const [period, setPeriod] = useState<Period>("30d");
+  const [period, setPeriod] = useState<Period>("all");
+  const [q, setQ] = useState("");
+  const dq = useDeferredValue(q);
 
   return (
     <>
@@ -46,30 +49,39 @@ export default function Leaderboard() {
           optionValue="key"
           onChange={(e) => setBoard(e.value as Board)}
         />
+        {board !== "invites" && (
+          <InputText
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="поиск по нику"
+            aria-label="поиск по нику"
+          />
+        )}
         <span style={{ flex: 1 }} />
         <SelectButton
           className="chip-group"
           value={period}
-          options={PERIODS.map((p) => ({ label: p, value: p }))}
+          options={PERIODS.map((p) => ({ label: PERIOD_LABELS[p], value: p }))}
           optionValue="value"
           onChange={(e) => setPeriod(e.value as Period)}
         />
       </div>
-      {board === "voice" && <VoiceBoard key={period} guildId={guildId} period={period} />}
-      {board === "chat" && <ChatBoard key={period} guildId={guildId} period={period} />}
+      {board === "voice" && <VoiceBoard key={period} guildId={guildId} period={period} q={dq} />}
+      {board === "chat" && <ChatBoard key={period} guildId={guildId} period={period} q={dq} />}
       {board === "invites" && <InvitesBoard key={period} guildId={guildId} period={period} />}
     </>
   );
 }
 
-function VoiceBoard({ guildId, period }: { guildId: string; period: Period }) {
+function VoiceBoard({ guildId, period, q }: { guildId: string; period: Period; q: string }) {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [top, setTop] = useState(10);
   const [grid, setGrid] = useGridPref();
+  useEffect(() => setPage(1), [q, period]);
   const query = useQuery({
-    queryKey: ["leaderboard", guildId, period, PAGE_SIZE, page],
-    queryFn: () => api.leaderboard(guildId, period, PAGE_SIZE, page),
+    queryKey: ["leaderboard", guildId, period, PAGE_SIZE, page, q],
+    queryFn: () => api.leaderboard(guildId, period, PAGE_SIZE, page, q),
     placeholderData: (prev) => prev,
   });
 
@@ -121,11 +133,13 @@ function VoiceBoard({ guildId, period }: { guildId: string; period: Period }) {
           </div>
         </Section>
       )}
-      <Section title={`Лидерборд — всего участников: ${total}`}>
+      <Section title={`Лидерборд · за период «${PERIOD_LABELS[period]}» · всего участников: ${total}`}>
         <div className="toolbar">
           <span className="muted tiny">
             {total === 0
-              ? "нет данных за период"
+              ? q
+                ? `ник не найден: «${q}»`
+                : "нет данных за период"
               : `стр. ${page} из ${pages}: с ${rankOffset + 1} по ${rankOffset + items.length}`}
           </span>
           <span style={{ flex: 1 }} />

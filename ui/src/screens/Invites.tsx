@@ -10,7 +10,7 @@ import {
   YAxis,
 } from "recharts";
 import { api } from "../api/client";
-import type { Period } from "../api/types";
+import { PERIOD_LABELS, type Period } from "../api/types";
 import { ChartControls, Grid, useGridPref } from "../components/charts";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDate } from "../lib/format";
@@ -62,7 +62,7 @@ export function InvitesBoard({ guildId, period }: { guildId: string; period: Per
           </div>
         </Section>
       )}
-      <Section title={`Вступления (${data.attributions.length})`}>
+      <Section title={`Вступления · за период «${PERIOD_LABELS[period]}» (${data.attributions.length})`}>
         {data.attributions.length === 0 ? (
           <Empty>Вступлений за период не зафиксировано.</Empty>
         ) : (

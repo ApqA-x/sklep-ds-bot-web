@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "primereact/button";
@@ -11,7 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import { api } from "../api/client";
-import type { Period } from "../api/types";
+import { PERIOD_LABELS, type Period } from "../api/types";
 import { ChartControls, Grid, useGridPref } from "../components/charts";
 import { ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDate } from "../lib/format";
@@ -19,14 +19,15 @@ import { fmtDate } from "../lib/format";
 const TOPS = [5, 10, 20, 50];
 const PAGE_SIZE = 50;
 
-export function ChatBoard({ guildId, period }: { guildId: string; period: Period }) {
+export function ChatBoard({ guildId, period, q }: { guildId: string; period: Period; q: string }) {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [top, setTop] = useState(10);
   const [grid, setGrid] = useGridPref();
+  useEffect(() => setPage(1), [q, period]);
   const query = useQuery({
-    queryKey: ["chat-leaderboard", guildId, period, PAGE_SIZE, page],
-    queryFn: () => api.chatLeaderboard(guildId, period, PAGE_SIZE, page),
+    queryKey: ["chat-leaderboard", guildId, period, PAGE_SIZE, page, q],
+    queryFn: () => api.chatLeaderboard(guildId, period, PAGE_SIZE, page, q),
     placeholderData: (prev) => prev,
   });
 
@@ -72,11 +73,13 @@ export function ChatBoard({ guildId, period }: { guildId: string; period: Period
           </div>
         </Section>
       )}
-      <Section title={`Лидерборд по сообщениям — всего авторов: ${total}`}>
+      <Section title={`Лидерборд по сообщениям · за период «${PERIOD_LABELS[period]}» · всего авторов: ${total}`}>
         <div className="toolbar">
           <span className="muted tiny">
             {total === 0
-              ? "нет сообщений за период"
+              ? q
+                ? `ник не найден: «${q}»`
+                : "нет сообщений за период"
               : `стр. ${page} из ${pages}: с ${rankOffset + 1} по ${rankOffset + items.length}`}
           </span>
           <span style={{ flex: 1 }} />

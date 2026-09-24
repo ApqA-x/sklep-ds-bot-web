@@ -66,6 +66,27 @@ def test_chat_leaderboard_pipeline_period_and_all() -> None:
     assert all_time[5]["$facet"]["page"] == [{"$skip": 0}, {"$limit": 10}]
 
 
+def test_leaderboard_pipeline_search_matches_user_name() -> None:
+    pipeline = queries.build_leaderboard_pipeline("123", None, 10, q="анна")
+    search = [step for step in pipeline if "$match" in step and "userName" in step["$match"]]
+    assert search == [{"$match": {"userName": {"$regex": "анна", "$options": "i"}}}]
+
+    # спецсимволы экранируются — пользователь не может сломать регексп
+    pipeline = queries.build_leaderboard_pipeline("123", None, 10, q="a.*b(")
+    regex = [s for s in pipeline if "$match" in s and "userName" in s["$match"]][0]["$match"]["userName"]["$regex"]
+    assert regex == r"a\.\*b\("
+
+    # без поиска шага $match по имени нет
+    plain = queries.build_leaderboard_pipeline("123", None, 10)
+    assert not any("$match" in s and "userName" in s["$match"] for s in plain)
+
+
+def test_chat_leaderboard_pipeline_search_matches_user_name() -> None:
+    pipeline = queries.build_chat_leaderboard_pipeline("123", None, 10, q="юзер")
+    search = [step for step in pipeline if "$match" in step and "userName" in step["$match"]]
+    assert search == [{"$match": {"userName": {"$regex": "юзер", "$options": "i"}}}]
+
+
 def test_invites_by_inviter_pipeline_requires_inviter() -> None:
     pipeline = queries.build_invites_by_inviter_pipeline("9", _dt(2), 50)
     match = pipeline[0]["$match"]

@@ -53,11 +53,21 @@ def get_leaderboard(
     period: str = Query("30d"),
     limit: int = Query(50, ge=1, le=100),
     page: int = Query(1, ge=1, le=200),
+    q: str = Query("", max_length=64),
 ) -> dict:
     guild = _snowflake(guildId, "guildId")
     _period(period)
-    items, total, cached = queries.leaderboard(_db(request), guild, period, limit, page)
-    return {"guildId": guild, "period": period, "limit": limit, "page": page, "total": total, "cached": cached, "items": items}
+    items, total, cached = queries.leaderboard(_db(request), guild, period, limit, page, q.strip())
+    return {
+        "guildId": guild,
+        "period": period,
+        "limit": limit,
+        "page": page,
+        "q": q.strip(),
+        "total": total,
+        "cached": cached,
+        "items": items,
+    }
 
 
 @router.get("/chat-leaderboard")
@@ -67,11 +77,21 @@ def get_chat_leaderboard(
     period: str = Query("30d"),
     limit: int = Query(50, ge=1, le=100),
     page: int = Query(1, ge=1, le=200),
+    q: str = Query("", max_length=64),
 ) -> dict:
     guild = _snowflake(guildId, "guildId")
     _period(period)
-    items, total, cached = queries.chat_leaderboard(_db(request), guild, period, limit, page)
-    return {"guildId": guild, "period": period, "limit": limit, "page": page, "total": total, "cached": cached, "items": items}
+    items, total, cached = queries.chat_leaderboard(_db(request), guild, period, limit, page, q.strip())
+    return {
+        "guildId": guild,
+        "period": period,
+        "limit": limit,
+        "page": page,
+        "q": q.strip(),
+        "total": total,
+        "cached": cached,
+        "items": items,
+    }
 
 
 @router.get("/sessions/active")

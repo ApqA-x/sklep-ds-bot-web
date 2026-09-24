@@ -32,6 +32,11 @@ export function fmtDay(iso: string): string {
   return iso.slice(0, 10);
 }
 
+export function fmtDayRu(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split("-");
+  return d && m && y ? `${d}.${m}.${y}` : iso;
+}
+
 export function discordUserUrl(userId: string): string {
   return `https://discord.com/users/${userId}`;
 }

@@ -70,9 +70,10 @@ a:hover {
 }
 
 .brand {
+  font-size: 1.35rem;
   font-weight: 700;
   letter-spacing: 0.03em;
-  color: var(--mauve);
+  color: #fff;
 }
 
 .nav {
@@ -90,16 +91,8 @@ a:hover {
   border-bottom: 2px solid var(--mauve);
 }
 
-.guild-switch {
-  margin-left: auto;
-  display: flex;
-  gap: 0.4rem;
-  align-items: center;
-}
-
-.guild-switch input,
-.guild-switch .p-inputtext {
-  width: 190px;
+.guild-btn {
+  flex: none;
 }
 
 input,
@@ -634,6 +627,14 @@ pre.inline {
   gap: 0.4rem;
   color: var(--subtext0);
   font-size: 0.9rem;
+  flex: none;
+}
+.user-chip a {
+  color: var(--text);
+  font-weight: 600;
+}
+.user-chip a:hover {
+  text-decoration: underline;
 }
 
 .guild-list {

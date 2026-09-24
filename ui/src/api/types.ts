@@ -8,6 +8,12 @@ export type Health = {
 
 export type Period = "7d" | "30d" | "all";
 
+export const PERIOD_LABELS: Record<Period, string> = {
+  "7d": "7 дней",
+  "30d": "30 дней",
+  all: "всё время",
+};
+
 export type LeaderboardItem = {
   userId: string;
   userName: string;

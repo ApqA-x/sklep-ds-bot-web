@@ -98,11 +98,13 @@ def parse_date_bound(value: str, *, end: bool) -> datetime | None:
 # --- pipeline builders (pure, unit-tested without a database) ---
 
 
-def build_leaderboard_pipeline(guild_id: str, cutoff: datetime | None, limit: int, skip: int = 0) -> list[dict]:
+def build_leaderboard_pipeline(
+    guild_id: str, cutoff: datetime | None, limit: int, skip: int = 0, q: str = ""
+) -> list[dict]:
     match: dict[str, Any] = {"guildId": guild_id}
     if cutoff is not None:
         match["joinedAt"] = {"$gte": cutoff}
-    return [
+    pipeline: list[dict[str, Any]] = [
         {"$match": match},
         {"$sort": {"joinedAt": 1}},
         {
@@ -113,23 +115,32 @@ def build_leaderboard_pipeline(guild_id: str, cutoff: datetime | None, limit: in
                 "appearances": {"$sum": 1},
             }
         },
-        {"$sort": {"totalMs": -1}},
-        {
-            "$facet": {
-                "page": [{"$skip": skip}, {"$limit": limit}],
-                "total": [{"$count": "n"}],
-            }
-        },
     ]
+    if q:
+        pipeline.append({"$match": {"userName": {"$regex": re.escape(q), "$options": "i"}}})
+    pipeline.extend(
+        [
+            {"$sort": {"totalMs": -1}},
+            {
+                "$facet": {
+                    "page": [{"$skip": skip}, {"$limit": limit}],
+                    "total": [{"$count": "n"}],
+                }
+            },
+        ]
+    )
+    return pipeline
 
 
-def build_chat_leaderboard_pipeline(guild_id: str, cutoff: datetime | None, limit: int, skip: int = 0) -> list[dict]:
+def build_chat_leaderboard_pipeline(
+    guild_id: str, cutoff: datetime | None, limit: int, skip: int = 0, q: str = ""
+) -> list[dict]:
     """Топ по числу сообщений. authorName берётся $last после сортировки по sentAt,
     то есть самое свежее имя автора — как в голосовом лидерборде."""
     match: dict[str, Any] = {"guildId": guild_id}
     if cutoff is not None:
         match["sentAt"] = {"$gte": cutoff}
-    return [
+    pipeline: list[dict[str, Any]] = [
         {"$match": match},
         {"$sort": {"sentAt": 1}},
         {
@@ -149,14 +160,21 @@ def build_chat_leaderboard_pipeline(guild_id: str, cutoff: datetime | None, limi
                 "channels": {"$size": "$channels"},
             }
         },
-        {"$sort": {"messages": -1}},
-        {
-            "$facet": {
-                "page": [{"$skip": skip}, {"$limit": limit}],
-                "total": [{"$count": "n"}],
-            }
-        },
     ]
+    if q:
+        pipeline.append({"$match": {"userName": {"$regex": re.escape(q), "$options": "i"}}})
+    pipeline.extend(
+        [
+            {"$sort": {"messages": -1}},
+            {
+                "$facet": {
+                    "page": [{"$skip": skip}, {"$limit": limit}],
+                    "total": [{"$count": "n"}],
+                }
+            },
+        ]
+    )
+    return pipeline
 
 
 def build_user_totals_pipeline(guild_id: str, user_id: str, cutoff: datetime | None) -> list[dict]:
@@ -262,14 +280,16 @@ def build_member_search_pipeline(guild_id: str, query: str, limit: int) -> list[
 # --- executors (db is a pymongo Database or a test fake with the same surface) ---
 
 
-def leaderboard(db: Any, guild_id: str, period: str, limit: int, page: int = 1) -> tuple[list[dict], int, bool]:
-    """Страница лидерборда: (items, total_users, cached)."""
-    key = (guild_id, period, limit, page)
+def leaderboard(
+    db: Any, guild_id: str, period: str, limit: int, page: int = 1, q: str = ""
+) -> tuple[list[dict], int, bool]:
+    """Страница лидерборда: (items, total_users, cached). q — подстрока ника."""
+    key = (guild_id, period, limit, page, q)
     cached = _leaderboard_cache.get(key)
     if cached is not None:
         return cached[0], cached[1], True
     rows = db[COLL_PARTICIPANTS].aggregate(
-        build_leaderboard_pipeline(guild_id, period_cutoff(period), limit, (page - 1) * limit)
+        build_leaderboard_pipeline(guild_id, period_cutoff(period), limit, (page - 1) * limit, q)
     )
     facet = next(iter(rows), None) or {}
     items = [
@@ -287,14 +307,16 @@ def leaderboard(db: Any, guild_id: str, period: str, limit: int, page: int = 1) 
     return items, total, False
 
 
-def chat_leaderboard(db: Any, guild_id: str, period: str, limit: int, page: int = 1) -> tuple[list[dict], int, bool]:
+def chat_leaderboard(
+    db: Any, guild_id: str, period: str, limit: int, page: int = 1, q: str = ""
+) -> tuple[list[dict], int, bool]:
     """Страница лидерборда по сообщениям: (items, total_authors, cached)."""
-    key = (guild_id, period, limit, page)
+    key = (guild_id, period, limit, page, q)
     cached = _chat_leaderboard_cache.get(key)
     if cached is not None:
         return cached[0], cached[1], True
     rows = db[COLL_CHAT].aggregate(
-        build_chat_leaderboard_pipeline(guild_id, period_cutoff(period), limit, (page - 1) * limit)
+        build_chat_leaderboard_pipeline(guild_id, period_cutoff(period), limit, (page - 1) * limit, q)
     )
     facet = next(iter(rows), None) or {}
     items = [

@@ -268,9 +268,9 @@ button:disabled {
 }
 .send-tabs .p-tabview-nav-item.p-highlight .p-tabview-nav-link,
 .send-tabs .p-tabview-nav-item.p-highlight .p-tabview-nav-link:hover {
-  background: color-mix(in srgb, var(--mauve) 22%, var(--mantle));
-  border-color: var(--mauve);
-  color: var(--text);
+  background: var(--pink);
+  border-color: var(--pink);
+  color: var(--crust);
   font-weight: 600;
 }
 

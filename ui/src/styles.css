@@ -222,6 +222,20 @@ button:disabled {
   flex-wrap: wrap;
 }
 
+/* главная кнопка панелей отправки («отправить» / «отправить блок») — розовая */
+.send-row .p-button {
+  background: var(--pink);
+  border-color: var(--pink);
+  color: var(--crust);
+  font-weight: 600;
+}
+
+.send-row .p-button:enabled:hover {
+  background: color-mix(in srgb, var(--pink) 78%, black);
+  border-color: color-mix(in srgb, var(--pink) 78%, black);
+  color: var(--crust);
+}
+
 .send-panel .p-inputtextarea {
   width: 100%;
   resize: vertical;

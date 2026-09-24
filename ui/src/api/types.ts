@@ -265,6 +265,8 @@ export type NamesPayload = {
 export type ChatPreset = {
   id: string;
   text: string;
+  name: string | null;
+  channelIds: string[];
   createdAt: string | null;
 };
 

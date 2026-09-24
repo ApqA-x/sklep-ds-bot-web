@@ -170,18 +170,25 @@ def test_stalker_add_and_remove() -> None:
 def test_chat_preset_add_list_remove() -> None:
     db = _settings_db()
     client = _dev_client(db)
-    add = client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "add", "text": "  привет  "})
+    channel = "190000000000000000"
+    add = client.post(
+        f"/api/guild/{GUILD}/chat-presets",
+        json={"action": "add", "text": "  привет  ", "name": " приветик ", "channelIds": [channel]},
+    )
     assert add.status_code == 200
     preset_id = add.json()["presetId"]
     doc = db[queries.COLL_CHAT_PRESETS].docs[0]
     assert doc["_id"] == preset_id
     assert doc["guildId"] == GUILD
     assert doc["text"] == "привет"  # текст нормализуется моделью
+    assert doc["name"] == "приветик"
+    assert doc["channelIds"] == [channel]
     listing = client.get(f"/api/guild/{GUILD}/chat-presets")
     assert listing.status_code == 200
     items = listing.json()["items"]
     assert len(items) == 1
     assert items[0]["id"] == preset_id and items[0]["text"] == "привет"
+    assert items[0]["name"] == "приветик" and items[0]["channelIds"] == [channel]
     assert items[0]["createdAt"]
     actions = [d["action"] for d in db[COLL_AUDIT].docs]
     assert actions == ["chatPreset.add"]
@@ -191,20 +198,63 @@ def test_chat_preset_add_list_remove() -> None:
     assert [d["action"] for d in db[COLL_AUDIT].docs] == ["chatPreset.add", "chatPreset.remove"]
 
 
+def test_chat_preset_add_without_name_keeps_null() -> None:
+    db = _settings_db()
+    client = _dev_client(db)
+    add = client.post(
+        f"/api/guild/{GUILD}/chat-presets",
+        json={"action": "add", "text": "анонс", "channelIds": ["190000000000000000"]},
+    )
+    assert add.status_code == 200
+    doc = db[queries.COLL_CHAT_PRESETS].docs[0]
+    assert doc["name"] is None
+    item = client.get(f"/api/guild/{GUILD}/chat-presets").json()["items"][0]
+    assert item["name"] is None
+
+
 def test_chat_preset_validation() -> None:
     db = _settings_db()
     client = _dev_client(db)
-    assert client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "add", "text": "   "}).status_code == 422
+    channel = "190000000000000000"
+    assert (
+        client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "add", "text": "   ", "channelIds": [channel]})
+        .status_code
+        == 422
+    )
     assert client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "add"}).status_code == 422
+    # канал обязателен: без него пресет некуда отправлять
+    assert client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "add", "text": "x"}).status_code == 422
+    assert (
+        client.post(
+            f"/api/guild/{GUILD}/chat-presets", json={"action": "add", "text": "x", "channelIds": ["не-id"]}
+        ).status_code
+        == 422
+    )
+    assert (
+        client.post(
+            f"/api/guild/{GUILD}/chat-presets",
+            json={"action": "add", "text": "x", "channelIds": [channel], "name": "y" * 101},
+        ).status_code
+        == 422
+    )
     assert client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "remove"}).status_code == 422
-    assert client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "add", "text": "x" * 2001}).status_code == 422
+    assert (
+        client.post(
+            f"/api/guild/{GUILD}/chat-presets",
+            json={"action": "add", "text": "x" * 2001, "channelIds": [channel]},
+        ).status_code
+        == 422
+    )
     assert db[queries.COLL_CHAT_PRESETS].docs == []
 
 
 def test_chat_preset_remove_scoped_to_guild() -> None:
     db = _settings_db()
     client = _dev_client(db)
-    add = client.post(f"/api/guild/{GUILD}/chat-presets", json={"action": "add", "text": "наш"})
+    add = client.post(
+        f"/api/guild/{GUILD}/chat-presets",
+        json={"action": "add", "text": "наш", "channelIds": ["190000000000000000"]},
+    )
     preset_id = add.json()["presetId"]
     other = "170000000000000001"
     remove = client.post(f"/api/guild/{other}/chat-presets", json={"action": "remove", "presetId": preset_id})

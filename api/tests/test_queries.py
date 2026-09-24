@@ -393,14 +393,14 @@ def test_known_user_colors_picks_top_colored_role() -> None:
 def test_chat_presets_lists_guild_documents_sorted() -> None:
     db = FakeDB()
     db[queries.COLL_CHAT_PRESETS] = FakeCollection(queries.COLL_CHAT_PRESETS, docs=[
-        {"_id": "p2", "guildId": "1", "text": "второй", "createdAt": _dt(2)},
-        {"_id": "p1", "guildId": "1", "text": "первый", "createdAt": _dt(1)},
+        {"_id": "p2", "guildId": "1", "text": "второй", "name": "B", "channelIds": ["c2"], "createdAt": _dt(2)},
+        {"_id": "p1", "guildId": "1", "text": "первый", "createdAt": _dt(1)},  # старые доки: name/каналов нет
         {"_id": "p3", "guildId": "other", "text": "чужая гильдия", "createdAt": _dt(3)},
     ])
     items = queries.chat_presets(db, "1")
     assert items == [
-        {"id": "p1", "text": "первый", "createdAt": "2026-09-01T00:00:00Z"},
-        {"id": "p2", "text": "второй", "createdAt": "2026-09-02T00:00:00Z"},
+        {"id": "p1", "text": "первый", "name": None, "channelIds": [], "createdAt": "2026-09-01T00:00:00Z"},
+        {"id": "p2", "text": "второй", "name": "B", "channelIds": ["c2"], "createdAt": "2026-09-02T00:00:00Z"},
     ]
 
 

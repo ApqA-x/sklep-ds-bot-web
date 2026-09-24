@@ -179,7 +179,14 @@ def mutate_chat_preset(
             raise ValueError("chat preset text must be 1..2000 chars")
         preset_id = uuid.uuid4().hex
         db[queries.COLL_CHAT_PRESETS].insert_one(
-            {"_id": preset_id, "guildId": guild_id, "text": text, "createdAt": now}
+            {
+                "_id": preset_id,
+                "guildId": guild_id,
+                "text": text,
+                "name": body.name,
+                "channelIds": list(body.channelIds or []),
+                "createdAt": now,
+            }
         )
     else:
         preset_id = (body.presetId or "").strip()
@@ -189,7 +196,12 @@ def mutate_chat_preset(
         guild_id=guild_id,
         actor=actor,
         action=f"chatPreset.{body.action}",
-        after={"presetId": preset_id, "text": body.text if body.action == "add" else None},
+        after={
+            "presetId": preset_id,
+            "text": body.text if body.action == "add" else None,
+            "name": body.name if body.action == "add" else None,
+            "channelIds": body.channelIds if body.action == "add" else None,
+        },
     )
     return {"ok": True, "presetId": preset_id}
 

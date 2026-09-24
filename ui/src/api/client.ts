@@ -160,10 +160,12 @@ export const api = {
 
   chatPresets: (guildId: string) => apiGet<ChatPresetPage>(`/api/guild/${guildId}/chat-presets`),
 
-  chatPresetAdd: (guildId: string, text: string) =>
+  chatPresetAdd: (guildId: string, text: string, name: string | null, channelIds: string[]) =>
     apiSend<{ ok: boolean; presetId: string }>("POST", `/api/guild/${guildId}/chat-presets`, {
       action: "add",
       text,
+      name,
+      channelIds,
     }),
 
   chatPresetRemove: (guildId: string, presetId: string) =>

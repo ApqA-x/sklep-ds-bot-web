@@ -223,12 +223,14 @@ class ChannelMessageAction(BaseModel):
 
 
 class ChatPresetAction(BaseModel):
-    """Пресет текста для отправки в чат: add сохраняет текст, remove удаляет по id."""
+    """Пресет сообщения: add сохраняет текст с названием и каналом(-ами), remove удаляет по id."""
 
     model_config = ConfigDict(extra="forbid")
 
     action: Literal["add", "remove"]
     text: str | None = None
+    name: str | None = None
+    channelIds: list[str] | None = None
     presetId: str | None = None
 
     @model_validator(mode="after")
@@ -238,6 +240,14 @@ class ChatPresetAction(BaseModel):
             if not 1 <= len(text) <= 2000:
                 raise ValueError("text must be 1..2000 characters")
             self.text = text
+            name = (self.name or "").strip()
+            if len(name) > 100:
+                raise ValueError("name must be at most 100 characters")
+            self.name = name or None
+            channels = _check_id_list(self.channelIds or [], "channelId")
+            if not 1 <= len(channels) <= 20:
+                raise ValueError("channelIds must contain 1..20 channel ids")
+            self.channelIds = channels
         else:
             preset_id = (self.presetId or "").strip()
             if not 1 <= len(preset_id) <= 64:

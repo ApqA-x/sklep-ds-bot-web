@@ -629,7 +629,13 @@ def known_user_colors(db: Any, guild_id: str, role_meta: dict[str, tuple[int, in
 def chat_presets(db: Any, guild_id: str) -> list[dict[str, Any]]:
     docs = db[COLL_CHAT_PRESETS].find({"guildId": guild_id}, sort=[("createdAt", 1)])
     return [
-        {"id": str(doc.get("_id")), "text": str(doc.get("text") or ""), "createdAt": _iso(doc.get("createdAt"))}
+        {
+            "id": str(doc.get("_id")),
+            "text": str(doc.get("text") or ""),
+            "name": str(doc.get("name") or "").strip() or None,
+            "channelIds": [str(c) for c in doc.get("channelIds") or []],
+            "createdAt": _iso(doc.get("createdAt")),
+        }
         for doc in docs
     ]
 

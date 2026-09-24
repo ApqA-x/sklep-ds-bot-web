@@ -2,10 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useParams } from "react-router-dom";
 import { Button } from "primereact/button";
-import { confirmDialog } from "primereact/confirmdialog";
 import { MultiSelect } from "primereact/multiselect";
 import { SelectButton } from "primereact/selectbutton";
 import { InputTextarea } from "primereact/inputtextarea";
+import { InputText } from "primereact/inputtext";
 import { api, useCanWrite } from "../api/client";
 import type { ChatAttachment, ChatMessage, ChatPreset } from "../api/types";
 import { TargetUserPicker } from "../components/userSearch";
@@ -94,6 +94,7 @@ function BotSendPanel({ guildId }: { guildId: string }) {
   const [files, setFiles] = useState<File[]>([]);
   const [attachError, setAttachError] = useState<string | null>(null);
   const [presetError, setPresetError] = useState<string | null>(null);
+  const [presetName, setPresetName] = useState("");
   const [sending, setSending] = useState(false);
   const [armed, setArmed] = useState(false); // первое нажатие при N>1 — только взводишь подтверждение
   const [results, setResults] = useState<SendResult[] | null>(null);
@@ -130,12 +131,12 @@ function BotSendPanel({ guildId }: { guildId: string }) {
     setAttachError(null);
   };
 
-  const dispatch = async (body: string, attach: File[], clearOnOk: boolean) => {
+  const dispatch = async (body: string, attach: File[], clearOnOk: boolean, channels: string[]) => {
     setArmed(false);
     setSending(true);
     setResults([]);
     const out: SendResult[] = [];
-    for (const channelId of targets) {
+    for (const channelId of channels) {
       try {
         await api.botMessage(guildId, channelId, body, attach);
         out.push({ channelId, ok: true });
@@ -158,30 +159,22 @@ function BotSendPanel({ guildId }: { guildId: string }) {
       setArmed(true);
       return;
     }
-    await dispatch(trimmed, files, true);
+    await dispatch(trimmed, files, true, targets);
   };
 
-  const sendPreset = (preset: ChatPreset) => {
-    if (sending || targets.length === 0) return;
-    if (targets.length > 1) {
-      confirmDialog({
-        header: "Отправка пресета",
-        message: `Отправить пресет в ${targets.length} канала?`,
-        icon: "pi pi-exclamation-triangle",
-        acceptLabel: "Отправить",
-        rejectLabel: "Отмена",
-        accept: () => void dispatch(preset.text, [], false),
-      });
-      return;
-    }
-    void dispatch(preset.text, [], false);
+  const applyPreset = (preset: ChatPreset) => {
+    setPresetError(null);
+    setText(preset.text);
+    setTargets(preset.channelIds);
+    setArmed(false);
   };
 
   const savePreset = async () => {
-    if (!trimmed) return;
+    if (!trimmed || targets.length === 0) return;
     try {
       setPresetError(null);
-      await api.chatPresetAdd(guildId, trimmed);
+      await api.chatPresetAdd(guildId, trimmed, presetName.trim() || null, targets);
+      setPresetName("");
       await queryClient.invalidateQueries({ queryKey: ["chat-presets", guildId] });
     } catch (err) {
       setPresetError(err instanceof Error ? err.message : String(err));
@@ -232,29 +225,42 @@ function BotSendPanel({ guildId }: { guildId: string }) {
         }}
       />
       <div className="preset-row">
-        <Button className="chip" icon="pi pi-bookmark" disabled={!trimmed || sending} onClick={() => void savePreset()}>
+        <InputText
+          value={presetName}
+          maxLength={100}
+          placeholder="название пресета"
+          disabled={sending}
+          onChange={(e) => setPresetName(String(e.target.value ?? ""))}
+        />
+        <Button
+          className="chip"
+          icon="pi pi-bookmark"
+          disabled={!trimmed || targets.length === 0 || sending}
+          onClick={() => void savePreset()}
+        >
           сохранить как пресет
         </Button>
-        {(presets.data?.items.length ?? 0) > 0 && (
-          <span className="muted tiny">клик по пресету — отправить в выбранные каналы</span>
+        {trimmed && targets.length === 0 ? (
+          <span className="muted tiny">для пресета выбери каналы</span>
+        ) : (
+          (presets.data?.items.length ?? 0) > 0 && (
+            <span className="muted tiny">клик по пресету — заполнит текст и каналы, отправка кнопкой</span>
+          )
         )}
       </div>
       {presetError && <p className="hint danger">{presetError}</p>}
       {(presets.data?.items.length ?? 0) > 0 && (
         <div className="preset-list">
           {presets.data!.items.map((p) => (
-            <span className="chip preset-chip" key={p.id} title={p.text}>
-              <button
-                type="button"
-                className="preset-send"
-                disabled={sending || targets.length === 0}
-                onClick={() => sendPreset(p)}
-              >
-                {p.text.length > 70 ? `${p.text.slice(0, 70)}…` : p.text}
+            <span
+              className="chip preset-chip"
+              key={p.id}
+              title={`${p.text}\nканалы: ${p.channelIds.map(nameOfChannel).join(", ") || "не сохранены"}`}
+            >
+              <button type="button" className="preset-send" disabled={sending} onClick={() => applyPreset(p)}>
+                {p.name ?? (p.text.length > 70 ? `${p.text.slice(0, 70)}…` : p.text)}
               </button>
-              <Button className="chip-x" title="подставить в текст" disabled={sending} onClick={() => setText(p.text)}>
-                ✎
-              </Button>
+              <span className="muted tiny">{p.channelIds.map(nameOfChannel).join(" ")}</span>
               <Button className="chip-x" title="удалить пресет" disabled={sending} onClick={() => void removePreset(p.id)}>
                 ×
               </Button>

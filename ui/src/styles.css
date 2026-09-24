@@ -242,32 +242,29 @@ button:disabled {
 .preset-chip {
   display: inline-flex;
   align-items: center;
-  gap: 0.25rem;
+  gap: 0.4rem;
   max-width: 100%;
-  padding: 0.15rem 0.3rem 0.15rem 0.6rem;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  user-select: none;
 }
 
-.preset-send {
-  background: none;
-  border: none;
-  color: inherit;
-  font: inherit;
-  padding: 0;
-  cursor: pointer;
-  text-align: left;
+.preset-chip .preset-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   max-width: 26rem;
 }
 
-.preset-send:hover:not(:disabled) {
-  text-decoration: underline;
-}
-
-.preset-send:disabled {
+.preset-chip.disabled {
   cursor: default;
   opacity: 0.6;
+}
+
+.preset-chip.disabled:hover {
+  transform: none;
+  background: var(--surface0);
+  border-color: var(--surface1);
 }
 
 .send-results {

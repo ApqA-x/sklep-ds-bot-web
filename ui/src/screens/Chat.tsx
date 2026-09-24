@@ -253,15 +253,26 @@ function BotSendPanel({ guildId }: { guildId: string }) {
         <div className="preset-list">
           {presets.data!.items.map((p) => (
             <span
-              className="chip preset-chip"
+              className={sending ? "chip preset-chip disabled" : "chip preset-chip"}
               key={p.id}
               title={`${p.text}\nканалы: ${p.channelIds.map(nameOfChannel).join(", ") || "не сохранены"}`}
+              onClick={() => {
+                if (!sending) applyPreset(p);
+              }}
             >
-              <button type="button" className="preset-send" disabled={sending} onClick={() => applyPreset(p)}>
+              <span className="preset-label">
                 {p.name ?? (p.text.length > 70 ? `${p.text.slice(0, 70)}…` : p.text)}
-              </button>
+              </span>
               <span className="muted tiny">{p.channelIds.map(nameOfChannel).join(" ")}</span>
-              <Button className="chip-x" title="удалить пресет" disabled={sending} onClick={() => void removePreset(p.id)}>
+              <Button
+                className="chip-x"
+                title="удалить пресет"
+                disabled={sending}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void removePreset(p.id);
+                }}
+              >
                 ×
               </Button>
             </span>

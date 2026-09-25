@@ -659,6 +659,96 @@ def chat_presets(db: Any, guild_id: str) -> list[dict[str, Any]]:
     return items
 
 
+# ------------------------------------------------------------------ T11: keyset-курсор чата
+#
+# Второй ключ сортировки — messageId: строка, уникальна в гильдии (unique-индекс
+# chat_guildId_messageId_unique) и есть у всех документов писателя. Курсор
+# содержит ОБА ключа, направление и версию формата; условия границы — та же
+# лексикографическая пара, что и сортировка:
+#   desc: sentAt < t OR (sentAt == t AND messageId < m); asc — обратные ветви.
+# Гильдия/канал-фильтры остаются вне $or и применяются к обеим ветвям (H04).
+# Произвольные Mongo-операторы из курсора в запрос не попадают: decode строгий.
+
+CHAT_CURSOR_VERSION = 1
+CURSOR_KEYS = frozenset({"v", "t", "m", "s", "f"})
+
+
+class ChatCursorError(ValueError):
+    """Повреждённый/чужой/несовместимый курсор — только 4xx, без угадывания."""
+
+
+def chat_filter_fingerprint(
+    guild_id: str,
+    channel_ids: list[str] | None,
+    user_id: str | None,
+    msg_type: str | None,
+    date_from: datetime | None,
+    date_to: datetime | None,
+    sort: str,
+) -> str:
+    import hashlib
+
+    canonical = "|".join([
+        guild_id,
+        ",".join(sorted({c for c in (channel_ids or []) if c})),
+        user_id or "",
+        msg_type or "",
+        date_from.isoformat() if date_from else "",
+        date_to.isoformat() if date_to else "",
+        sort,
+    ])
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+
+
+def encode_chat_cursor(sent_at: datetime, message_id: str, sort: str, fingerprint: str) -> str:
+    import base64
+    import json as _json
+
+    # BSON-datetime под tz_aware=False приходит naive — трактуем строго как UTC,
+    # иначе .timestamp() применит локальную зону и сдвинет границу (урок T09)
+    if sent_at.tzinfo is None:
+        sent_at = sent_at.replace(tzinfo=timezone.utc)
+    payload = {
+        "v": CHAT_CURSOR_VERSION,
+        "t": int(sent_at.timestamp() * 1000),
+        "m": str(message_id),
+        "s": sort,
+        "f": fingerprint,
+    }
+    raw = _json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def decode_chat_cursor(value: str, *, sort: str, fingerprint: str) -> tuple[datetime, str]:
+    import base64
+    import json as _json
+
+    try:
+        padded = value + "=" * (-len(value) % 4)
+        blob = base64.urlsafe_b64decode(padded.encode("ascii"))
+        payload = _json.loads(blob.decode("utf-8"))
+    except Exception:
+        raise ChatCursorError("cursor is malformed") from None
+    if not isinstance(payload, dict) or frozenset(payload.keys()) != CURSOR_KEYS:
+        raise ChatCursorError("cursor has unknown shape")
+    if payload["v"] != CHAT_CURSOR_VERSION:
+        raise ChatCursorError("unsupported cursor version")
+    t = payload["t"]
+    m = payload["m"]
+    s = payload["s"]
+    f = payload["f"]
+    # строгие типы: никаких вложенных документов/операторов (H04)
+    if not isinstance(t, int) or isinstance(t, bool) or not 0 < t < 2**62:
+        raise ChatCursorError("cursor time must be epoch milliseconds")
+    if not isinstance(m, str) or not 1 <= len(m) <= 64 or any(ch not in "0123456789" for ch in m):
+        raise ChatCursorError("cursor message key must be a numeric snowflake string")
+    if s not in ("asc", "desc") or s != sort:
+        raise ChatCursorError("cursor direction conflicts with requested sort")
+    if not isinstance(f, str) or f != fingerprint:
+        raise ChatCursorError("cursor belongs to a different guild/filter selection")
+    return datetime.fromtimestamp(0, tz=timezone.utc) + timedelta(milliseconds=t), m
+
+
 def chat_channels(db: Any, guild_id: str) -> list[dict[str, Any]]:
     """Text channels of a guild that have stored messages, most recent activity first."""
     pipeline = [
@@ -684,6 +774,7 @@ def chat_messages(
     limit: int,
     *,
     after: datetime | None = None,
+    cursor: str = "",
     user_id: str | None = None,
     msg_type: str | None = None,
     date_from: datetime | None = None,
@@ -722,9 +813,36 @@ def chat_messages(
             {"content": {"$not": {"$regex": r"https?://"}}},
         ]
     direction = 1 if sort == "asc" else -1
-    docs = list(db[COLL_CHAT].find(where, sort=[("sentAt", direction)], limit=limit + 1))
+
+    # T11: keyset-граница по паре (sentAt, messageId). Старый before/after и cursor
+    # молча не смешиваются — либо/либо (переходный контракт объявлен в read.py).
+    fingerprint = chat_filter_fingerprint(guild_id, ids, user_id, msg_type, date_from, date_to, sort)
+    next_cursor = ""
+    if cursor:
+        if before is not None or after is not None:
+            raise ChatCursorError("cursor and legacy before/after are exclusive")
+        bound_at, bound_id = decode_chat_cursor(cursor, sort=sort, fingerprint=fingerprint)
+        cmp_op = "$gt" if direction == 1 else "$lt"
+        where["$or"] = [
+            {"sentAt": {cmp_op: bound_at}},
+            {"sentAt": bound_at, "messageId": {cmp_op: bound_id}},
+        ]
+
+    docs = list(
+        db[COLL_CHAT].find(where, sort=[("sentAt", direction), ("messageId", direction)], limit=limit + 1)
+    )
     has_more = len(docs) > limit
     page = docs[:limit]
+    if has_more and page:
+        last = page[-1]
+        last_at = last.get("sentAt")
+        if isinstance(last_at, datetime):
+            next_cursor = encode_chat_cursor(
+                last_at, str(last.get("messageId") or last.get("_id")), sort, fingerprint
+            )
+    # ленту всегда показываем хронологически; сортировка по datetime: ISO-строки с
+    # разной дробной частью секунды лексикографически врут («…00Z» > «…00.5Z»)
+    page = sorted(page, key=lambda d: (not isinstance(d.get("sentAt"), datetime), d.get("sentAt") or 0))
     items = [
         {
             "messageId": str(doc.get("messageId") or doc.get("_id")),
@@ -752,13 +870,14 @@ def chat_messages(
         }
         for doc in page
     ]
-    items.sort(key=lambda item: item["sentAt"])  # ленту всегда показываем хронологически
     return {
         "guildId": guild_id,
         "channelIds": ids,
         "items": items,
         "hasMore": has_more,
         "sort": sort,
+        "nextCursor": next_cursor or None,
+        # deprecated (легаси-клиенты до атомарного обновления UI):
         "nextBefore": items[0]["sentAt"] if items else None,
         "nextAfter": items[-1]["sentAt"] if items else None,
     }

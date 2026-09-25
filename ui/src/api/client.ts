@@ -7,6 +7,7 @@ import type {
   ChatMessagesPage,
   ChatPresetPage,
   DiscordAuditPage,
+  DiscordAuditSyncStatus,
   EmbedSpec,
   GuildAccess,
   GuildSettingsDoc,
@@ -239,6 +240,7 @@ export const api = {
     guildId: string,
     opts: {
       channelId?: string[];
+      cursor?: string;
       before?: string;
       after?: string;
       limit?: number;
@@ -251,6 +253,7 @@ export const api = {
   ) => {
     const p = new URLSearchParams();
     for (const id of opts.channelId ?? []) p.append("channelId", id);
+    if (opts.cursor) p.set("cursor", opts.cursor); // T11: keyset-курсор; не смешивается с before/after
     if (opts.before) p.set("before", opts.before);
     if (opts.after) p.set("after", opts.after);
     p.set("limit", String(opts.limit ?? 50));
@@ -319,11 +322,18 @@ export const api = {
       `/api/guild/${guildId}/audit/discord/actions`,
     ),
 
+  auditDiscordStatus: (guildId: string) =>
+    apiGet<DiscordAuditSyncStatus>(`/api/guild/${guildId}/audit/discord/status`),
+
+  // T11: успешный ответ sync содержит полный status_snapshot (полнота, курсоры, ошибки)
   auditDiscordSync: (guildId: string) =>
-    apiSend<{ guildId: string; ok: boolean; discordStatus: number; inserted: number; error?: string }>(
-      "POST",
-      `/api/guild/${guildId}/audit/discord/sync`,
-    ),
+    apiSend<DiscordAuditSyncStatus & {
+      ok: boolean;
+      discordStatus: number;
+      inserted: number;
+      error?: string;
+      skipped?: string;
+    }>("POST", `/api/guild/${guildId}/audit/discord/sync`),
 
   botRole: (guildId: string, userId: string, roleId: string, action: "grant" | "revoke") =>
     apiSend<BotOperationResult>(

@@ -1119,6 +1119,13 @@ button.danger:hover:not(:disabled) {
   color: var(--red);
 }
 
+/* T11: состояние синхронизации копии журнала Discord (полнота/доступ/отставание) */
+.audit-sync-banner {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0.25rem 0 0.6rem;
+}
+
 .muted.tiny,
 .tiny {
   font-size: 0.76rem;

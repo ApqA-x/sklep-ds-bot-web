@@ -925,7 +925,7 @@ export default function Chat() {
   const activeCount = [filters.userId, filters.type, filters.dateFrom, filters.dateTo].filter(Boolean).length;
 
   const fetchPage = useCallback(
-    async (extra: { before?: string; after?: string }) => {
+    async (extra: { cursor?: string }) => {
       const seq = ++requestSeq.current;
       setLoading(true);
       setError(null);
@@ -937,15 +937,22 @@ export default function Chat() {
           dateFrom: filters.dateFrom || undefined,
           dateTo: filters.dateTo || undefined,
           sort: filters.sort,
-          before: extra.before,
-          after: extra.after,
+          cursor: extra.cursor,
         });
         if (seq !== requestSeq.current) return; // устаревший ответ (сменили фильтры)
         setMessages((prev) => {
-          if (!extra.before && !extra.after) return page.items;
-          return filters.sort === "desc" ? [...page.items, ...prev] : [...prev, ...page.items];
+          if (!extra.cursor) return page.items;
+          // T11: границы keyset-страниц могут пересекаться при equal-sentAt — дедуп по стабильному messageId
+          const merged =
+            filters.sort === "desc" ? [...page.items, ...prev] : [...prev, ...page.items];
+          const seen = new Set<string>();
+          return merged.filter((m) => {
+            if (seen.has(m.messageId)) return false;
+            seen.add(m.messageId);
+            return true;
+          });
         });
-        setCursor(page.hasMore ? (filters.sort === "desc" ? page.nextBefore : page.nextAfter) : null);
+        setCursor(page.hasMore ? page.nextCursor : null);
       } catch (err) {
         if (seq === requestSeq.current) setError(err instanceof Error ? err.message : String(err));
       } finally {
@@ -1088,11 +1095,7 @@ export default function Chat() {
             <div className="toolbar">
               <Button
                 disabled={loading}
-                onClick={() =>
-                  void fetchPage(
-                    filters.sort === "desc" ? { before: cursor ?? undefined } : { after: cursor ?? undefined },
-                  )
-                }
+                onClick={() => void fetchPage({ cursor: cursor ?? undefined })}
               >
                 {loading ? "загрузка…" : filters.sort === "desc" ? "показать более ранние" : "показать более новые"}
               </Button>

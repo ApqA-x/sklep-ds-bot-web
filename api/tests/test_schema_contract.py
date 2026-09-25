@@ -6,7 +6,7 @@ import pytest
 
 from api import queries, schema_contract
 
-MANIFEST_CHECKSUM = "c5b7a93c667c77261581365cdbb29e8b468168b7ebb7dfe80878a14868f7f953"
+MANIFEST_CHECKSUM = "fc126fa18013c90a7a2ac5a3f062c206202fe7e966d1e7fd144e8b2fa91613c4"
 
 
 def test_manifest_copy_checksum_matches_bot_source_of_truth() -> None:
@@ -76,12 +76,17 @@ def test_verify_accepts_equivalent_alias_and_flags_mismatch() -> None:
 
     # runner-спецификации: TTL-индекс с верным expireAfterSeconds эквивалентен
     uniq_spec = next(s for s in manifest["indexes"] if s["name"] == "discord_audit_guildId_entryId_unique")
-    db_docs = {"operations": [_actual_doc(ttl_spec)], "discord_audit_logs": [_actual_doc(uniq_spec)]}
-    report = schema_contract.verify_web_schema(Db(db_docs), owners=("runner",))
+    state_spec = next(s for s in manifest["indexes"] if s["name"] == "discord_audit_state_guildId_unique")
+    # T11 (M4): состояние синхронизации аудита — unique(guildId), инвариант H08
+    assert state_spec["owner"] == "runner" and state_spec["unique"] is True
+    def runner_db(ttl_doc: dict) -> dict[str, list[dict]]:
+        return {"operations": [ttl_doc], "discord_audit_logs": [_actual_doc(uniq_spec)],
+                "discord_audit_state": [_actual_doc(state_spec)]}
+
+    report = schema_contract.verify_web_schema(Db(runner_db(_actual_doc(ttl_spec))), owners=("runner",))
     assert report["ok"]
     # а с изменённым TTL — несовместимость поднимается
     warped = _actual_doc(ttl_spec)
     warped["expireAfterSeconds"] = 60
     with pytest.raises(schema_contract.SchemaIncompatible):
-        schema_contract.verify_web_schema(
-            Db({"operations": [warped], "discord_audit_logs": [_actual_doc(uniq_spec)]}), owners=("runner",))
+        schema_contract.verify_web_schema(Db(runner_db(warped)), owners=("runner",))

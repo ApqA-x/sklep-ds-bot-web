@@ -339,16 +339,30 @@ def audit_discord_actions(request: Request, guildId: str) -> dict:
     }
 
 
+@router.get("/audit/discord/status")
+def audit_discord_status(request: Request, guildId: str) -> dict:
+    """T11: честная сводка синхронизации — полнота (backfillComplete), отставание,
+    403-доступ, курсоры. UI по нему различает «загружено» / «дозагрузка истории» /
+    «нет доступа» / «отстаёт» и не обещает недоступную Discord-историю (H09)."""
+    from . import audit_sync
+
+    guild = _snowflake(guildId, "guildId")
+    return {"guildId": guild, **audit_sync.status_snapshot(_db(request), guild)}
+
+
 @router.post("/audit/discord/sync")
 async def audit_discord_sync(request: Request, guildId: str) -> dict:
-    """Обновить локальную копию журнала Discord прямо сейчас."""
+    """Обновить локальную копию журнала Discord прямо сейчас. Read-only обращение к
+    Discord + идемпотентный upsert — журнал операций (operations) не требуется.
+    Координируется с фоновым циклом через lease (H08): занят → skipped без гонки."""
     from . import audit_sync
 
     guild = _snowflake(guildId, "guildId")
     cfg = request.app.state.config
     if not cfg.discord_token:
         raise HTTPException(status_code=503, detail="bot token not configured")
-    result = await audit_sync.sync_guild(_db(request), cfg, guild)
+    result = await audit_sync.sync_guild(_db(request), cfg, guild,
+                                         scan_pages=audit_sync.MANUAL_SCAN_PAGES)
     if not result["ok"] and result["discordStatus"] == 403:
         result["error"] = "у роли бота нет разрешения «Просматривать журнал аудита»"
     return {"guildId": guild, **result}
@@ -367,6 +381,7 @@ def chat_messages(
     channelId: list[str] = Query(default=[]),
     before: str = Query(""),
     after: str = Query(""),
+    cursor: str = Query(""),
     limit: int = Query(50, ge=1, le=200),
     userId: str = Query(""),
     type: str = Query("", pattern="^(||text|link|file|image)$"),
@@ -397,19 +412,24 @@ def chat_messages(
         except queries.InvalidDate:
             raise HTTPException(status_code=422, detail="invalid date") from None
 
-    return queries.chat_messages(
-        _db(request),
-        guild,
-        ids or None,
-        _iso_dt(before, "before"),
-        limit,
-        after=_iso_dt(after, "after"),
-        user_id=userId or None,
-        msg_type=type or None,
-        date_from=_bound(dateFrom, end=False),
-        date_to=_bound(dateTo, end=True),
-        sort=sort,
-    )
+    try:
+        return queries.chat_messages(
+            _db(request),
+            guild,
+            ids or None,
+            _iso_dt(before, "before"),
+            limit,
+            after=_iso_dt(after, "after"),
+            cursor=cursor,
+            user_id=userId or None,
+            msg_type=type or None,
+            date_from=_bound(dateFrom, end=False),
+            date_to=_bound(dateTo, end=True),
+            sort=sort,
+        )
+    except queries.ChatCursorError as exc:
+        # повреждённый/чужой/смешанный курсор — явная 400 (H04), UI сбрасывает на первую страницу
+        raise HTTPException(status_code=400, detail=str(exc)) from None
 
 
 @router.get("/picker")

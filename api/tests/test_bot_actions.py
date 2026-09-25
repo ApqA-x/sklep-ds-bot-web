@@ -287,7 +287,7 @@ def test_audit_discord_sync_then_read(monkeypatch: pytest.MonkeyPatch) -> None:
 
     async def fake_request(cfg, method, path, *, json_body=None, reason=None, files=None):
         calls.append((method, path))
-        if "after=" in path:
+        if "before=" in path:
             return 200, {"audit_log_entries": [], "users": []}
         return 200, SAMPLE_LOG
 
@@ -295,14 +295,27 @@ def test_audit_discord_sync_then_read(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _client()
 
     body = client.post(f"/api/guild/{GUILD}/audit/discord/sync").json()
-    assert body == {"guildId": GUILD, "ok": True, "discordStatus": 200, "inserted": 3}
+    assert body["ok"] is True and body["discordStatus"] == 200 and body["inserted"] == 3
+    # T11: sync возвращает честный снапшот — пустая страница от Discord доказала низ истории
+    assert body["backfillComplete"] is True
+    assert body["freshCursor"] == "1300000000083886080"  # max entryId
+    assert body["backfillCursor"] == "1300000000000000000"  # низ сохранённого окна
+    assert body["accessDenied"] is False and body["lastSuccessAt"]
     assert ("GET", f"/guilds/{GUILD}/audit-logs?limit=100") in calls
     docs = client.app.state.db["discord_audit_logs"].docs
     assert all(d["guildId"] == GUILD for d in docs)
+    # состояние живёт отдельным документом на гильдию
+    state = client.app.state.db["discord_audit_state"].docs
+    assert [s["guildId"] for s in state] == [GUILD]
+    assert state[0]["leaseOwner"] == ""  # lease освобождён после прохода
 
     # повторный sync идемпотентен: всё уже в базе, новых нет
     body = client.post(f"/api/guild/{GUILD}/audit/discord/sync").json()
-    assert body["ok"] is True and body["inserted"] == 0
+    assert body["ok"] is True and body["inserted"] == 0 and body["backfillComplete"] is True
+
+    status = client.get(f"/api/guild/{GUILD}/audit/discord/status").json()
+    assert status["guildId"] == GUILD and status["backfillComplete"] is True
+    assert status["storedEntries"] == 3 and status["syncStale"] is False
 
     page = client.get(f"/api/guild/{GUILD}/audit/discord").json()
     assert page["source"] == "discord" and page["total"] == 3

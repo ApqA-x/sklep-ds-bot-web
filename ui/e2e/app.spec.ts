@@ -17,6 +17,10 @@ async function mockApi(page: Page, opts: { authenticated: boolean }) {
     const send = (json: unknown, status = 200) =>
       route.fulfill({ status, contentType: "application/json", body: JSON.stringify(json) });
     if (path === "/api/auth/whoami") return send(me);
+    // ЧЕСТЬ сервера (T03: reads fail-closed): без сессии guild-endpoint'ы отдают
+    // 401 — UI обязан показать ошибку/вход, а не данные.
+    if (!opts.authenticated && path.startsWith("/api/guild/"))
+      return send({ detail: "unauthorized" }, 401);
     if (path === "/api/guilds")
       return send({
         guilds: opts.authenticated
@@ -46,7 +50,7 @@ test("не-аутентифицированный пользователь ви�
   await mockApi(page, { authenticated: false });
   await page.goto("/");
   await expect(page.getByText("Войти через Discord")).toBeVisible();
-  // прямой заход на защищённый экран не показывает данные
+  // прямой заход: сервер без сессии отдаёт 401 (мок честный), UI не показывает данные
   await page.goto("/g/77/leaderboard");
   await expect(page.getByText("alice")).toHaveCount(0);
 });

@@ -79,6 +79,17 @@ def create_app(
                 log.info("web indexes: %s", ensure_web_indexes(database))
             except Exception:
                 log.warning("web index creation failed", exc_info=True)
+            # T10: контракт индексов (сверка по спецификации); нарушение не скрывается
+            from .schema_contract import verify_web_schema
+
+            schema_report = verify_web_schema(database)
+            if schema_report.get("acceptedAlias"):
+                log.info("schema: эквивалентные индексы под другими именами: %s",
+                         schema_report["acceptedAlias"])
+            if not schema_report.get("skipped") and not schema_report.get("ok"):
+                (log.warning if cfg.app_env != "production" else log.error)(
+                    "schema: индексы web-контракта отсутствуют: %s — выполните migration runner",
+                    schema_report["missing"])
             try:
                 from .queries import migrate_settings_revision
 

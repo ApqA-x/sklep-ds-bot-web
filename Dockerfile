@@ -8,13 +8,32 @@ COPY ui/ ./
 RUN npm run build
 
 FROM python:3.12-slim AS runtime
-WORKDIR /srv
+
+# T15/п.1-2: зависимости строго из api/requirements.lock (uv pip compile,
+# --require-hashes сверяет sha256 каждого колеса на обеих целевых платформах
+# образа, linux/amd64 и linux/arm64). Диапазоны из requirements.txt в сборке
+# образа больше не резолвятся.
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
-COPY api/requirements.txt ./api/requirements.txt
-RUN pip install --no-cache-dir -r api/requirements.txt
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_PYTHON_PREFERENCE=only-system
+COPY --from=ghcr.io/astral-sh/uv:0.12.19 /uv /usr/local/bin/uv
+
+WORKDIR /srv
+COPY api/requirements.lock ./api/requirements.lock
+RUN uv venv /srv/.venv \
+ && uv pip install --python /srv/.venv/bin/python --no-cache --require-hashes -r api/requirements.lock
+ENV VIRTUAL_ENV=/srv/.venv \
+    PATH="/srv/.venv/bin:${PATH}"
+
 COPY api/ ./api/
 COPY --from=ui-build /ui/dist ./ui/dist
+
+# T15/п.9: не root по умолчанию (compose задаёт user: и так, но ручной
+# docker run и CI-smoke получают безопасный дефолт; uid 10001 = DSBOT_UID).
+RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin dsbot \
+ && chown -R dsbot:dsbot /srv
+USER 10001:10001
+
 EXPOSE 8000
 # T12: контейнерный health = readiness (готовность работать), а не liveness:
 # healthz всегда 200, пока процесс обслуживает запросы, и не отражал бы отвал

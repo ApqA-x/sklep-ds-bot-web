@@ -5,18 +5,91 @@ on:
     tags:
       - "v*"
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Существующий тег vMAJOR.MINOR.PATCH для публикации (пройдёт тот же gate)"
+        required: true
+
+# T15/п.5 (CI03): публикация возможна только для SHA, на котором ci.yml
+# уже закончился success, и только если этот SHA достижим из main. Ни тег из
+# случайной ветки, ни ручной dispatch не обходят гейт — dispatch обязан
+# назвать существующий тег, и он проверяется идентично.
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/sklep-ds-bot-web
+  UV_VERSION: "0.12.19"
+
+permissions:
+  contents: read
 
 jobs:
+  gate:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.resolve.outputs.sha }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolve tag -> commit
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
+        run: |
+          case "$TAG" in
+            v[0-9]*) ;;
+            *) echo "тег '$TAG' не похож на vMAJOR.MINOR.PATCH"; exit 1;;
+          esac
+          OBJ=$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" --jq '.object')
+          TYPE=$(echo "$OBJ" | jq -r .type)
+          SHA=$(echo "$OBJ" | jq -r .sha)
+          if [ "$TYPE" = "tag" ]; then
+            SHA=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$SHA" --jq .object.sha)
+          fi
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "тег $TAG -> коммит $SHA"
+
+      - name: SHA достижим из main (не тег из чужой ветки)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          STATUS=$(gh api "repos/$GITHUB_REPOSITORY/compare/$SHA...main" --jq .status)
+          # behind|identical: коммит лежит в истории main; ahead/diverged — нет
+          case "$STATUS" in
+            behind|identical) echo "SHA в истории main (status=$STATUS)";;
+            *) echo "SHA НЕ в истории main (status=$STATUS) — публикация запрещена"; exit 1;;
+          esac
+
+      - name: CI на этом SHA прошёл зелёным
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: |
+          # обязательные job'ы ci.yml; имена = реальные названия джобов (п.6)
+          for REQUIRED in api integration ui ui-e2e; do
+            OK=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs" --paginate \
+              --jq "[.check_runs[] | select(.name == \"$REQUIRED\") | select(.status == \"completed\" and .conclusion == \"success\")] | length")
+            if [ "$OK" -lt 1 ]; then
+              echo "check '$REQUIRED' не найден зелёным на $SHA — сначала зелёный CI"
+              exit 1
+            fi
+            echo "gate: $REQUIRED ok"
+          done
+
   build:
+    needs: gate
     runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.gate.outputs.sha }}
 
       - uses: docker/setup-qemu-action@v4
 
@@ -28,21 +101,72 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: docker/metadata-action@v6
-        id: meta
-        with:
-          images: ${{ env.IMAGE }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
+      # теги считаем из проверенного имени тега (dispatch больше не публикует
+      # «текущий ref»): version, major.minor, и latest только для релизных тегов
+      - name: Image tags
+        id: tags
+        env:
+          VERSION: ${{ needs.gate.outputs.version }}
+        run: |
+          IMAGE_LC=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')  # GHCR требует lowercase
+          TAGS="$IMAGE_LC:$VERSION,$IMAGE_LC:${VERSION%.*}"
+          case "$VERSION" in
+            *-*) ;;  # пре-релиз: latest не трогаем
+            *) TAGS="$TAGS,$IMAGE_LC:latest";;
+          esac
+          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
+          echo "revision=${{ needs.gate.outputs.sha }}" >> "$GITHUB_OUTPUT"
 
-      - uses: docker/build-push-action@v7
+      - name: Build and push
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.tags.outputs.tags }}
+          labels: |
+            org.opencontainers.image.revision=${{ steps.tags.outputs.revision }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # CI07: смоук именно опубликованного digest на целевой платформе, а не
+  # заново собранного checkout. healthz=liveness: 200 только когда uvicorn
+  # реально поднялся на locked-зависимостях (dev-режим конфига, своя одноразовая
+  # Mongo — приложение при старте сверяет схему, поэтому без БД не стартует).
+  smoke:
+    needs: [gate, build]
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: read
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - "27017:27017"
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Smoke published digest
+        run: |
+          IMAGE_LC=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+          DIGEST=$(docker buildx imagetools inspect "$IMAGE_LC:${{ needs.gate.outputs.version }}" \
+            --format '{{json .Manifest.Digest}}' | tr -d '"')
+          echo "inspected $IMAGE_LC@$DIGEST"
+          # host-сеть: контейнер видит service-mongo на 127.0.0.1 и наружу
+          # отдаёт 8000 без bridge-манипуляций
+          docker run -d --name smoke --platform linux/amd64 --network host \
+            -e WEB_ENV=development -e MONGO_URI=mongodb://127.0.0.1:27017 \
+            "$IMAGE_LC@$DIGEST"
+          for i in $(seq 1 20); do
+            CODE=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/api/healthz || true)
+            if [ "$CODE" = "200" ]; then echo "SMOKE-OK (healthz 200, attempt $i)"; exit 0; fi
+            sleep 2
+          done
+          docker logs smoke
+          exit 1

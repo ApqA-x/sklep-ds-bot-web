@@ -13,7 +13,10 @@ export default defineConfig({
     trace: "off",
   },
   webServer: {
-    command: "npm run preview -- --port 4173 --strictPort",
+    // --host 127.0.0.1 обязателен в CI: по умолчанию vite preview биндится на
+    // «localhost», который на GitHub-раннере резолвится в ::1, а Playwright
+    // опрашивает http://127.0.0.1 → webServer «никогда не поднимается»
+    command: "npm run preview -- --port 4173 --strictPort --host 127.0.0.1",
     url: "http://127.0.0.1:4173/",
     reuseExistingServer: !process.env.CI,
   },

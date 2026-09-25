@@ -8,4 +8,17 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 os.environ.setdefault("WEB_ENV", "development")
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_buckets():
+    """T16: бакеты живут в модуле процесса — без сброса тесты делили бы
+    лимиты друг с друга и становились порядково-зависимыми (429-«призраки»)."""
+    from api import limits
+
+    limits.reset_all()
+    yield
+    limits.reset_all()

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -259,7 +260,10 @@ async def _action(
         raise HTTPException(status_code=503, detail="database unavailable")
     guild = _guild(request)
     actor = actor_of(request)
-    doc, _created = operations.create_intent(
+    # T16 п.3: journal (operations/mutations) — синхронный pymongo; все записи
+    # уходят в thread, чтобы медленная БД не вешала event loop под нагрузкой (L06).
+    doc, _created = await asyncio.to_thread(
+        operations.create_intent,
         db,
         guild_id=guild,
         actor=actor,
@@ -280,29 +284,39 @@ async def _action(
             saved = doc.get("error") or {}
             raise HTTPException(status_code=502, detail={**saved, "operationId": op_id, "replayed": True})
         raise HTTPException(status_code=504, detail={"error": "outcome_unproven", **replayed})
-    claimed_pair = operations.claim(db, op_id)
+    claimed_pair = await asyncio.to_thread(operations.claim, db, op_id)
     if claimed_pair is None:
         raise HTTPException(status_code=409, detail={"error": "operation_in_progress", "operationId": op_id})
     claimed, mode = claimed_pair
     if mode == "takeover" and not operations.is_idempotent(kind):
         # O07: переживший lease не доказывает ни эффект, ни его отсутствие;
         # для неидемпотентного kind слепой повтор запрещён — остаёмся unknown.
-        operations.finish(db, op_id, claimed, "unknown", error={"classification": "lease_expired_unproven"})
-        _audit(db, guild, actor, action, arguments, status=None,
-               detail={"classification": "lease_expired_unproven"}, ok=False, op_id=op_id)
+        await asyncio.to_thread(
+            operations.finish, db, op_id, claimed, "unknown", error={"classification": "lease_expired_unproven"}
+        )
+        await asyncio.to_thread(
+            _audit, db, guild, actor, action, arguments, status=None,
+            detail={"classification": "lease_expired_unproven"}, ok=False, op_id=op_id,
+        )
         raise HTTPException(status_code=504, detail={"error": "outcome_unproven", "operationId": op_id, "state": "unknown"})
     try:
         status, payload = await run()
     except HTTPException:
         # эффект не отправлялся (лимит/конфиг) — попытка честная, но без внешнего вызова
-        operations.finish(db, op_id, claimed, "failed", error={"classification": "not_dispatched"})
+        await asyncio.to_thread(
+            operations.finish, db, op_id, claimed, "failed", error={"classification": "not_dispatched"}
+        )
         raise
     except Exception as exc:  # noqa: BLE001 — транспорт: distinguish «не ушло» vs «неизвестно» (O05/O06)
         classification, definitely_no_effect = operations.classify_transport(exc)
         state = "failed" if definitely_no_effect else "unknown"
-        operations.finish(db, op_id, claimed, state, error={"classification": classification})
-        _audit(db, guild, actor, action, arguments, status=None,
-               detail={"classification": classification}, ok=False, op_id=op_id)
+        await asyncio.to_thread(
+            operations.finish, db, op_id, claimed, state, error={"classification": classification}
+        )
+        await asyncio.to_thread(
+            _audit, db, guild, actor, action, arguments, status=None,
+            detail={"classification": classification}, ok=False, op_id=op_id,
+        )
         raise HTTPException(
             status_code=504, detail={"error": classification, "operationId": op_id, "state": state}
         ) from exc
@@ -313,10 +327,14 @@ async def _action(
         resource_id = detail.get("id") if isinstance(detail, dict) else None
         if resource_id:
             result["discordResourceId"] = str(resource_id)  # T08.7: зацепка для ручной сверки
-        operations.finish(db, op_id, claimed, "succeeded", result=result)
+        await asyncio.to_thread(operations.finish, db, op_id, claimed, "succeeded", result=result)
     else:
-        operations.finish(db, op_id, claimed, "failed", error={"discordStatus": status, "body": detail})
-    _audit(db, guild, actor, action, arguments, status=status, detail=detail, ok=ok, op_id=op_id)
+        await asyncio.to_thread(
+            operations.finish, db, op_id, claimed, "failed", error={"discordStatus": status, "body": detail}
+        )
+    await asyncio.to_thread(
+        _audit, db, guild, actor, action, arguments, status=status, detail=detail, ok=ok, op_id=op_id,
+    )
     if not ok:
         raise HTTPException(status_code=502, detail={"discordStatus": status, "body": detail, "operationId": op_id})
     return {"ok": True, "discordStatus": status, "operationId": op_id, "state": "succeeded"}
@@ -551,7 +569,7 @@ async def operation_status(request: Request, guildId: str, operationId: str) -> 
     db = request.app.state.db
     if db is None:
         raise HTTPException(status_code=503, detail="database unavailable")
-    doc = operations.get_operation(db, guildId, operationId)
+    doc = await asyncio.to_thread(operations.get_operation, db, guildId, operationId)
     if doc is None:
         raise HTTPException(status_code=404, detail="operation not found")
     return operations.public_view(doc)
@@ -563,6 +581,7 @@ async def operation_batch(request: Request, guildId: str, batchId: str) -> dict:
     db = request.app.state.db
     if db is None:
         raise HTTPException(status_code=503, detail="database unavailable")
-    views = [operations.public_view(doc) for doc in operations.list_batch(db, guildId, batchId)]
+    docs = await asyncio.to_thread(operations.list_batch, db, guildId, batchId)
+    views = [operations.public_view(doc) for doc in docs]
     pending = [v for v in views if v["state"] not in operations.TERMINAL]
     return {"batchId": batchId, "operations": views, "complete": not pending, "pending": len(pending)}

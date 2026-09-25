@@ -566,6 +566,36 @@ def test_chat_filters_type_user_date_sort_all_channels() -> None:
     assert [item["messageId"] for item in newer["items"]] == ["c", "d"]
 
 
+def test_chat_attachment_store_skip_reason_passthrough() -> None:
+    # L05: бот не сохранил вложение (квота диска) — причина доезжает до UI,
+    # а не молчаливый stored=false без объяснения.
+    db = FakeDB()
+    db[queries.COLL_CHAT] = FakeCollection(queries.COLL_CHAT, docs=[
+        {
+            "_id": "s",
+            "guildId": GUILD,
+            "channelId": "10",
+            "messageId": "s",
+            "authorUserId": USER,
+            "authorName": "alice",
+            "content": "",
+            "sentAt": _dt(5),
+            "attachments": [
+                {"id": "9", "filename": "pic.png", "contentType": "image/png", "size": 30,
+                 "kind": "image", "path": "", "stored": False,
+                 "url": "https://cdn.discord/9.png", "storeSkipReason": "disk-quota-low"},
+                {"id": "10", "filename": "ok.png", "contentType": "image/png", "size": 5,
+                 "kind": "image", "path": "g/2026-09/bb.png", "stored": True, "url": ""},
+            ],
+        },
+    ])
+    client = _client(db)
+    items = client.get(f"/api/guild/{GUILD}/chat").json()["items"]
+    atts = items[0]["attachments"]
+    assert atts[0]["storeSkipReason"] == "disk-quota-low"
+    assert atts[1]["storeSkipReason"] == ""  # сохранённое — без причины
+
+
 def test_chat_messages_multiple_channels() -> None:
     ch1, ch2 = "140000000000000000", "140000000000000001"
     client = _client(_chat_filter_db())

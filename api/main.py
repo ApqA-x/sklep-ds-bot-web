@@ -66,6 +66,13 @@ def create_app(
     elif not cfg.auth_enabled and not cfg.is_production:
         log.warning("auth gate disabled: OAuth/session config incomplete (mode=%s)", cfg.app_env)
 
+    # T16: бюджет Mongo-запроса и бакеты дорогих чтений — из конфигурации,
+    # до регистрации маршрутов (middleware/dependencies читают их при запросе).
+    from . import limits
+
+    limits.set_query_max_time_ms(cfg.query_max_time_ms)
+    limits.setup_defaults()
+
     # T12: создаём до lifespan — /api/readyz должен уметь отвечать и вне его
     supervisor = Supervisor()
     loop_monitor = LoopMonitor()
@@ -148,6 +155,24 @@ def create_app(
         redoc_url=None,
         lifespan=lifespan,
     )
+
+    # T16 (L04): Mongo убивает запрос по maxTimeMS → предсказуемый 503 с
+    # объяснением, вместо зависшей загрузки в UI.
+    try:
+        from pymongo.errors import ExecutionTimeout
+
+        @app.exception_handler(ExecutionTimeout)
+        async def _execution_timeout(_: Request, __: ExecutionTimeout) -> JSONResponse:
+            return JSONResponse(
+                {
+                    "detail": "query exceeded its time budget — narrow the period or retry later",
+                    "error": "query_timeout",
+                },
+                status_code=503,
+                headers={"Retry-After": "5"},
+            )
+    except ImportError:  # pragma: no cover — pymongo отсутствует только в урезанных окружениях
+        pass
     app.state.config = cfg
     app.state.supervisor = supervisor
     app.state.loop_monitor = loop_monitor
@@ -160,6 +185,10 @@ def create_app(
             mongo_client = MongoClient(
                 cfg.mongo_uri,
                 serverSelectionTimeoutMS=2000,
+                # T16 п.3/L06: зависший сокет не должен держать поток пула вечно;
+                # maxTimeMS (limits) ограничивает серверную часть операции
+                connectTimeoutMS=5000,
+                socketTimeoutMS=max(cfg.query_max_time_ms * 4, 30_000),
                 connect=False,
             )
         except Exception:

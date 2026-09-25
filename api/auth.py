@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
 import time
@@ -253,8 +254,19 @@ async def list_guilds(request: Request):
         names = _guild_names(bot_guilds)
         db = getattr(request.app.state, "db", None)
         if db is not None:
-            for doc in db["guild_settings"].find({}, projection={"_id": 1}):
-                names.setdefault(str(doc["_id"]), "")
+            # T16 п.3: синхронный pymongo вне event loop (пусть и маленький scan)
+            def _known_guild_ids() -> list[str]:
+                from .limits import timeout_kwargs
+
+                return [
+                    str(doc["_id"])
+                    for doc in db["guild_settings"].find(
+                        {}, projection={"_id": 1}, **timeout_kwargs()
+                    )
+                ]
+
+            for gid in await asyncio.to_thread(_known_guild_ids):
+                names.setdefault(gid, "")
         return {
             "guilds": [
                 {"guildId": gid, "name": name or gid, "canRead": True, "canWrite": True}

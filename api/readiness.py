@@ -39,15 +39,27 @@ def mongo_ping(mongo_client: Any) -> dict[str, Any]:
         return {"ok": False, "error": type(exc).__name__}
 
 
-def check_media(media_dir: str) -> dict[str, Any]:
+def check_media(media_dir: str, min_free_bytes: int = 0) -> dict[str, Any]:
     if not media_dir:
         return {"configured": False, "ok": True}
     try:
         ok = os.path.isdir(media_dir) and os.access(media_dir, os.R_OK | os.X_OK)
     except OSError:
         ok = False
+    out: dict[str, Any] = {"configured": True, "ok": bool(ok)}
+    if ok:
+        # T16 (L05): место под архив кончается — предупреждаем заранее. На
+        # готовность не влияем: чтение/отдача существующего архива работают,
+        # а ограничение новых загрузок — ответственность писателя (bot gateway).
+        try:
+            free = shutil.disk_usage(media_dir).free
+            out["freeMB"] = free // (1024 * 1024)
+            if min_free_bytes > 0:
+                out["quotaLow"] = free < min_free_bytes
+        except OSError as exc:
+            out["diskError"] = type(exc).__name__
     # путь наружу не отдаём
-    return {"configured": True, "ok": bool(ok)}
+    return out
 
 
 def check_schema(report: dict[str, Any] | None) -> dict[str, Any]:
@@ -67,7 +79,7 @@ def evaluate(app: Any) -> tuple[bool, dict[str, Any]]:
     checks = {
         "mongo": mongo_ping(getattr(app.state, "mongo", None)),
         "schema": check_schema(getattr(app.state, "schema_report", None)),
-        "media": check_media(cfg.media_dir),
+        "media": check_media(cfg.media_dir, getattr(cfg, "media_min_free_bytes", 0)),
     }
     supervisor = getattr(app.state, "supervisor", None)
     unhealthy = supervisor.unhealthy_tasks() if supervisor is not None else []
@@ -81,6 +93,9 @@ def evaluate(app: Any) -> tuple[bool, dict[str, Any]]:
         "checks": checks,
         "unhealthyTasks": unhealthy,
     }
+    if checks["media"].get("quotaLow"):
+        # предупреждение, не отказ: готовность сохраняется (см. check_media)
+        payload["warnings"] = ["media disk quota low"]
     monitor = getattr(app.state, "loop_monitor", None)
     if monitor is not None:
         payload["loop"] = monitor.snapshot()
@@ -90,6 +105,7 @@ def evaluate(app: Any) -> tuple[bool, dict[str, Any]]:
 def audit_overview(db: Any) -> dict[str, Any]:
     """Одна агрегирующая строка по discord_audit_state для лога диагностики."""
     from . import audit_sync
+    from .limits import timeout_kwargs
 
     now = datetime.now(timezone.utc)
     guilds = 0
@@ -109,6 +125,7 @@ def audit_overview(db: Any) -> dict[str, Any]:
                 "lastSuccessAt": 1,
                 "updatedAt": 1,
             },
+            **timeout_kwargs(),
         ):
             guilds += 1
             if doc.get("backfillComplete"):
@@ -161,12 +178,19 @@ async def diagnostics_loop(app: Any) -> None:
     и журнала аудита: по ней видно деградацию, не роясь в тысячах строк лога."""
     while True:
         await asyncio.sleep(DIAGNOSTICS_INTERVAL_S)
-        ready, payload = evaluate(app)
-        db = getattr(app.state, "db", None)
-        fields: dict[str, Any] = {"ready": ready}
-        if db is not None:
-            fields.update(audit_overview(db))
-            fields.update(media_disk(app.state.config.media_dir))
+        # T16 п.3: evaluate/audit_overview/media_disk — синхронные Mongo-чтения и
+        # statvfs диска; в event loop их держать нельзя (тот же процесс обслуживает
+        # HTTP) — уходят в thread (L06).
+        def _collect() -> tuple[bool, dict[str, Any], dict[str, Any]]:
+            ready, payload = evaluate(app)
+            fields: dict[str, Any] = {"ready": ready}
+            db = getattr(app.state, "db", None)
+            if db is not None:
+                fields.update(audit_overview(db))
+                fields.update(media_disk(app.state.config.media_dir))
+            return ready, payload, fields
+
+        _, _, fields = await asyncio.to_thread(_collect)
         supervisor = getattr(app.state, "supervisor", None)
         if supervisor is not None:
             fields["tasks"] = supervisor.snapshot()

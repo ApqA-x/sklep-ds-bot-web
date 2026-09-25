@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 from datetime import datetime
 from typing import Any
@@ -60,7 +61,10 @@ async def patch_settings(request: Request, guildId: str, body: GuildSettingsPatc
         await _check_channel(request, guild, channel_id)
     if body.autoRoleId:
         await _check_role(request, guild, body.autoRoleId)
-    status, doc = mutations.patch_guild_settings(_db(request), guild, body, actor_of(request))
+    # T16 п.3: синхронный pymongo (CAS + audit insert + перечитывание) — вне event loop
+    status, doc = await asyncio.to_thread(
+        mutations.patch_guild_settings, _db(request), guild, body, actor_of(request)
+    )
     if status == "conflict":
         # T06.8: 409 с безопасными данными новой версии; клиент сам решает,
         # какие поля применить к свежей revision (автоматического overwrite нет)
@@ -117,7 +121,8 @@ def list_stalker(request: Request, guildId: str) -> dict:
 def get_audit(
     request: Request,
     guildId: str,
-    page: int = Query(1, ge=1),
+    # L04: deep skip дорог (count + (page-1)*size) — предсказуемый потолок 4xx
+    page: int = Query(1, ge=1, le=200),
     size: int = Query(50, ge=1, le=100),
     origin: str = Query("", pattern="^(|web|discord)$"),
     userId: str = Query("", description="фильтр «над кем» совершено действие"),

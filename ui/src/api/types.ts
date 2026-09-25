@@ -350,6 +350,7 @@ export type ChatAttachment = {
   path: string; // относительный путь в /media, пуст если не сохранили
   stored: boolean;
   url: string; // исходная ссылка Discord (запасной вариант)
+  storeSkipReason?: string; // L05: почему бот НЕ сохранил (например disk-quota-low)
 };
 
 export type ChatMessage = {

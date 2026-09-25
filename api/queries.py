@@ -5,6 +5,8 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from .limits import command_timeout_kwargs, timeout_kwargs
+
 COLL_SESSIONS = "voice_sessions"
 COLL_PARTICIPANTS = "voice_session_participants"
 COLL_GUILD_SETTINGS = "guild_settings"
@@ -39,8 +41,13 @@ def period_cutoff(period: str) -> datetime | None:
 
 
 class TTLCache:
-    def __init__(self, ttl_seconds: float = 60.0) -> None:
+    """TTL + потолок записей (L06): ключ leaderboard включает q/page/limit — без
+    max_entries бесконечный поток уникальных запросов росил бы RAM, просроченные
+    записи при этом никто не вычищал (чистка была только на get)."""
+
+    def __init__(self, ttl_seconds: float = 60.0, max_entries: int = 256) -> None:
         self._ttl = ttl_seconds
+        self._max_entries = max(1, max_entries)
         self._entries: dict[tuple, tuple[float, Any]] = {}
 
     def get(self, key: tuple) -> Any:
@@ -54,7 +61,21 @@ class TTLCache:
         return value
 
     def set(self, key: tuple, value: Any) -> None:
-        self._entries[key] = (time.monotonic(), value)
+        now = time.monotonic()
+        if key in self._entries:
+            self._entries[key] = (now, value)
+            return
+        if len(self._entries) >= self._max_entries:
+            self._prune()
+        while len(self._entries) >= self._max_entries:
+            # очередь по давности вставки: dict сохраняет порядок ключей
+            self._entries.pop(next(iter(self._entries)))
+        self._entries[key] = (now, value)
+
+    def _prune(self) -> None:
+        now = time.monotonic()
+        for k in [k for k, (at, _) in self._entries.items() if now - at > self._ttl]:
+            del self._entries[k]
 
     def clear(self) -> None:
         self._entries.clear()
@@ -290,7 +311,8 @@ def leaderboard(
     if cached is not None:
         return cached[0], cached[1], True
     rows = db[COLL_PARTICIPANTS].aggregate(
-        build_leaderboard_pipeline(guild_id, period_cutoff(period), limit, (page - 1) * limit, q)
+        build_leaderboard_pipeline(guild_id, period_cutoff(period), limit, (page - 1) * limit, q),
+        **command_timeout_kwargs(),
     )
     facet = next(iter(rows), None) or {}
     items = [
@@ -317,7 +339,8 @@ def chat_leaderboard(
     if cached is not None:
         return cached[0], cached[1], True
     rows = db[COLL_CHAT].aggregate(
-        build_chat_leaderboard_pipeline(guild_id, period_cutoff(period), limit, (page - 1) * limit, q)
+        build_chat_leaderboard_pipeline(guild_id, period_cutoff(period), limit, (page - 1) * limit, q),
+        **command_timeout_kwargs(),
     )
     facet = next(iter(rows), None) or {}
     items = [
@@ -338,13 +361,17 @@ def chat_leaderboard(
 
 def active_sessions(db: Any, guild_id: str) -> list[dict]:
     sessions = list(
-        db[COLL_SESSIONS].find({"guildId": guild_id, "status": "active"}, sort=[("startedAt", 1)])
+        db[COLL_SESSIONS].find(
+            {"guildId": guild_id, "status": "active"}, sort=[("startedAt", 1)], **timeout_kwargs()
+        )
     )
     if not sessions:
         return []
     session_ids = [session["_id"] for session in sessions]
     participants = db[COLL_PARTICIPANTS].find(
-        {"sessionId": {"$in": session_ids}, "active": True}, sort=[("joinedAt", 1)]
+        {"sessionId": {"$in": session_ids}, "active": True},
+        sort=[("joinedAt", 1)],
+        **timeout_kwargs(),
     )
     by_session: dict[str, list[dict]] = {}
     for part in participants:
@@ -369,13 +396,14 @@ def active_sessions(db: Any, guild_id: str) -> list[dict]:
 
 def sessions_history(db: Any, guild_id: str, page: int, size: int) -> dict:
     where = {"guildId": guild_id, "status": "closed"}
-    total = db[COLL_SESSIONS].count_documents(where)
+    total = db[COLL_SESSIONS].count_documents(where, **command_timeout_kwargs())
     cursor = db[COLL_SESSIONS].find(
         where,
         projection={"_id": 1, "channelId": 1, "startedAt": 1, "endedAt": 1, "endedByUserId": 1, "summaryMessage": 1},
         sort=[("endedAt", -1)],
         skip=(page - 1) * size,
         limit=size,
+        **timeout_kwargs(),
     )
     items = [
         {
@@ -392,10 +420,12 @@ def sessions_history(db: Any, guild_id: str, page: int, size: int) -> dict:
 
 
 def session_detail(db: Any, guild_id: str, session_id: str) -> dict | None:
-    session = db[COLL_SESSIONS].find_one({"_id": session_id})
+    session = db[COLL_SESSIONS].find_one({"_id": session_id}, **timeout_kwargs())
     if session is None or str(session.get("guildId")) != guild_id:
         return None
-    participants = db[COLL_PARTICIPANTS].find({"sessionId": session_id}, sort=[("joinedAt", 1)])
+    participants = db[COLL_PARTICIPANTS].find(
+        {"sessionId": session_id}, sort=[("joinedAt", 1)], **timeout_kwargs()
+    )
     return {
         "id": str(session["_id"]),
         "guildId": str(session.get("guildId") or ""),
@@ -429,18 +459,24 @@ def _first(doc_cursor: Any) -> dict | None:
 
 def user_profile(db: Any, guild_id: str, user_id: str, period: str) -> dict | None:
     cutoff = period_cutoff(period)
+    budget = timeout_kwargs()  # курсорные find/find_one
+    cmd_budget = command_timeout_kwargs()  # aggregate/count_documents — только camelCase
     name_doc = _first(
         db[COLL_PARTICIPANTS].find(
-            {"guildId": guild_id, "userId": user_id}, sort=[("joinedAt", -1)], limit=1
+            {"guildId": guild_id, "userId": user_id}, sort=[("joinedAt", -1)], limit=1, **budget
         )
     )
-    totals_rows = list(db[COLL_PARTICIPANTS].aggregate(build_user_totals_pipeline(guild_id, user_id, cutoff)))
+    totals_rows = list(
+        db[COLL_PARTICIPANTS].aggregate(build_user_totals_pipeline(guild_id, user_id, cutoff), **cmd_budget)
+    )
     totals = totals_rows[0] if totals_rows else {"totalMs": 0, "appearances": 0}
     daily = [
         {"date": row["_id"], "ms": int(row.get("ms") or 0)}
-        for row in db[COLL_PARTICIPANTS].aggregate(build_user_daily_pipeline(guild_id, user_id, cutoff))
+        for row in db[COLL_PARTICIPANTS].aggregate(build_user_daily_pipeline(guild_id, user_id, cutoff), **cmd_budget)
     ]
-    role_state = db[COLL_ROLE_STATE].find_one({"guildId": guild_id, "userId": user_id})
+    role_state = db[COLL_ROLE_STATE].find_one(
+        {"guildId": guild_id, "userId": user_id}, **timeout_kwargs()
+    )
     nicknames = [
         {
             "nickname": doc.get("nickname"),
@@ -449,27 +485,32 @@ def user_profile(db: Any, guild_id: str, user_id: str, period: str) -> dict | No
             "source": doc.get("source"),
         }
         for doc in db[COLL_NICKNAME_HISTORY].find(
-            {"guildId": guild_id, "userId": user_id}, sort=[("changedAt", -1)], limit=MAX_PROFILE_NICKNAMES
+            {"guildId": guild_id, "userId": user_id},
+            sort=[("changedAt", -1)],
+            limit=MAX_PROFILE_NICKNAMES,
+            **budget,
         )
     ]
-    join_state = db[COLL_JOIN_STATE].find_one({"guildId": guild_id, "userId": user_id})
+    join_state = db[COLL_JOIN_STATE].find_one(
+        {"guildId": guild_id, "userId": user_id}, **timeout_kwargs()
+    )
     known = name_doc is not None or role_state is not None or join_state is not None
     if not known:
         return None
     msg_where: dict[str, Any] = {"guildId": guild_id, "authorUserId": user_id}
     if cutoff is not None:
         msg_where["sentAt"] = {"$gte": cutoff}
-    message_count = int(db[COLL_CHAT].count_documents(msg_where))
+    message_count = int(db[COLL_CHAT].count_documents(msg_where, **cmd_budget))
     invited_count = int(
-        db[COLL_JOIN_ATTRIBUTIONS].count_documents({"guildId": guild_id, "inviterUserId": user_id})
+        db[COLL_JOIN_ATTRIBUTIONS].count_documents({"guildId": guild_id, "inviterUserId": user_id}, **cmd_budget)
     )
     daily_messages = [
         {"date": row["_id"], "count": int(row.get("n") or 0)}
-        for row in db[COLL_CHAT].aggregate(build_chat_daily_pipeline(guild_id, user_id, cutoff))
+        for row in db[COLL_CHAT].aggregate(build_chat_daily_pipeline(guild_id, user_id, cutoff), **cmd_budget)
     ]
     daily_invites = [
         {"date": row["_id"], "count": int(row.get("n") or 0)}
-        for row in db[COLL_JOIN_ATTRIBUTIONS].aggregate(build_invites_daily_pipeline(guild_id, user_id, cutoff))
+        for row in db[COLL_JOIN_ATTRIBUTIONS].aggregate(build_invites_daily_pipeline(guild_id, user_id, cutoff), **cmd_budget)
     ]
     return {
         "guildId": guild_id,
@@ -518,7 +559,9 @@ def invites_overview(db: Any, guild_id: str, period: str) -> dict:
             "attributionStatus": doc.get("attributionStatus"),
             "source": doc.get("source"),
         }
-        for doc in db[COLL_JOIN_ATTRIBUTIONS].find(attr_match, sort=[("joinedAt", -1)], limit=MAX_INVITE_ROWS)
+        for doc in db[COLL_JOIN_ATTRIBUTIONS].find(
+            attr_match, sort=[("joinedAt", -1)], limit=MAX_INVITE_ROWS, **timeout_kwargs()
+        )
     ]
     catalog = [
         {
@@ -532,11 +575,15 @@ def invites_overview(db: Any, guild_id: str, period: str) -> dict:
             "lastSeenAt": _iso(doc.get("lastSeenAt")),
             "source": doc.get("source"),
         }
-        for doc in db[COLL_INVITE_CATALOG].find({"guildId": guild_id}, sort=[("lastSeenAt", -1)], limit=MAX_INVITE_ROWS)
+        for doc in db[COLL_INVITE_CATALOG].find(
+            {"guildId": guild_id}, sort=[("lastSeenAt", -1)], limit=MAX_INVITE_ROWS, **timeout_kwargs()
+        )
     ]
     by_inviter = [
         {"userId": str(row["_id"]), "userName": row.get("userName") or "unknown", "count": int(row.get("count") or 0)}
-        for row in db[COLL_JOIN_ATTRIBUTIONS].aggregate(build_invites_by_inviter_pipeline(guild_id, cutoff, 50))
+        for row in db[COLL_JOIN_ATTRIBUTIONS].aggregate(
+            build_invites_by_inviter_pipeline(guild_id, cutoff, 50), **command_timeout_kwargs()
+        )
     ]
     payload = {"guildId": guild_id, "period": period, "generatedAt": _iso(_utc_now()),
                "attributions": attributions, "catalog": catalog, "byInviter": by_inviter}
@@ -545,7 +592,7 @@ def invites_overview(db: Any, guild_id: str, period: str) -> dict:
 
 
 def settings_document(db: Any, guild_id: str) -> dict | None:
-    doc = db[COLL_GUILD_SETTINGS].find_one({"_id": guild_id})
+    doc = db[COLL_GUILD_SETTINGS].find_one({"_id": guild_id}, **timeout_kwargs())
     if doc is None:
         return None
     result = {key: _iso(value) for key, value in doc.items() if key != "_id"}
@@ -568,7 +615,9 @@ def migrate_settings_revision(db: Any) -> int:
 
 
 def stalker_subscriptions(db: Any, guild_id: str) -> list[dict]:
-    docs = db["stalker_subscriptions"].find({"guildId": guild_id}, sort=[("createdAt", -1)])
+    docs = db["stalker_subscriptions"].find(
+        {"guildId": guild_id}, sort=[("createdAt", -1)], **timeout_kwargs()
+    )
     return [
         {
             "id": str(doc.get("_id") or ""),
@@ -581,7 +630,7 @@ def stalker_subscriptions(db: Any, guild_id: str) -> list[dict]:
 
 
 def search_members(db: Any, guild_id: str, query: str, limit: int) -> list[dict]:
-    rows = db[COLL_PARTICIPANTS].aggregate(build_member_search_pipeline(guild_id, query, limit))
+    rows = db[COLL_PARTICIPANTS].aggregate(build_member_search_pipeline(guild_id, query, limit), **command_timeout_kwargs())
     return [{"userId": str(row["_id"]), "userName": row.get("userName") or "unknown"} for row in rows]
 
 
@@ -600,11 +649,13 @@ def known_user_names(db: Any, guild_id: str) -> dict[str, str]:
         {"$sort": {"joinedAt": 1}},
         {"$group": {"_id": "$userId", "userName": {"$last": "$userName"}}},
     ]
-    for row in db[COLL_PARTICIPANTS].aggregate(pipeline):
+    for row in db[COLL_PARTICIPANTS].aggregate(pipeline, **command_timeout_kwargs()):
         name = str(row.get("userName") or "")
         if name:
             names[str(row["_id"])] = name
-    for doc in db[COLL_NICKNAME_STATE].find({"guildId": guild_id}, projection={"userId": 1, "nickname": 1}):
+    for doc in db[COLL_NICKNAME_STATE].find(
+        {"guildId": guild_id}, projection={"userId": 1, "nickname": 1}, **timeout_kwargs()
+    ):
         nickname = str(doc.get("nickname") or "")
         if nickname:
             names[str(doc.get("userId"))] = nickname
@@ -625,7 +676,7 @@ def known_user_colors(db: Any, guild_id: str, role_meta: dict[str, tuple[int, in
     if cached is not None:
         return cached
     out: dict[str, str] = {}
-    for doc in db[COLL_ROLE_STATE].find({"guildId": guild_id}, {"userId": 1, "roleIds": 1}):
+    for doc in db[COLL_ROLE_STATE].find({"guildId": guild_id}, {"userId": 1, "roleIds": 1}, **timeout_kwargs()):
         uid = str(doc.get("userId") or "")
         if not uid:
             continue
@@ -641,7 +692,9 @@ def known_user_colors(db: Any, guild_id: str, role_meta: dict[str, tuple[int, in
 
 
 def chat_presets(db: Any, guild_id: str) -> list[dict[str, Any]]:
-    docs = db[COLL_CHAT_PRESETS].find({"guildId": guild_id}, sort=[("createdAt", 1)])
+    docs = db[COLL_CHAT_PRESETS].find(
+        {"guildId": guild_id}, sort=[("createdAt", 1)], **timeout_kwargs()
+    )
     items = []
     for doc in docs:
         item = {
@@ -758,7 +811,7 @@ def chat_channels(db: Any, guild_id: str) -> list[dict[str, Any]]:
         {"$sort": {"lastAt": -1}},
         {"$limit": 200},
     ]
-    rows = list(db[COLL_CHAT].aggregate(pipeline))
+    rows = list(db[COLL_CHAT].aggregate(pipeline, **command_timeout_kwargs()))
     return [
         {"channelId": str(row["_id"]), "count": int(row.get("count") or 0), "lastAt": _iso(row.get("lastAt"))}
         for row in rows
@@ -829,7 +882,9 @@ def chat_messages(
         ]
 
     docs = list(
-        db[COLL_CHAT].find(where, sort=[("sentAt", direction), ("messageId", direction)], limit=limit + 1)
+        db[COLL_CHAT].find(
+            where, sort=[("sentAt", direction), ("messageId", direction)], limit=limit + 1, **timeout_kwargs()
+        )
     )
     has_more = len(docs) > limit
     page = docs[:limit]
@@ -863,6 +918,9 @@ def chat_messages(
                     "path": a.get("path") or "",
                     "stored": bool(a.get("stored")),
                     "url": a.get("url") or "",
+                    # L05: если бот не сохранил вложение (например квота диска) —
+                    # причину несёт метаданные, UI показывает её, а не тишину.
+                    "storeSkipReason": str(a.get("storeSkipReason") or ""),
                 }
                 for a in (doc.get("attachments") or [])
                 if isinstance(a, dict)

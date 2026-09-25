@@ -52,6 +52,10 @@ class WebConfig:
     guild_allowlist: frozenset[str] = frozenset()
     media_dir: str = ""
     log_level: str = "INFO"
+    # T16: бюджет одного Mongo-запроса (maxTimeMS) и порог свободного места под
+    # MEDIA_DIR, ниже которого готовность даёт предупреждение (L04/L05/L06).
+    query_max_time_ms: int = 5000
+    media_min_free_bytes: int = 2 * 1024 * 1024 * 1024
     warnings: list[str] = field(default_factory=list)
 
     @property
@@ -190,6 +194,28 @@ def load_config(env: Any = None, *, validate: bool = True) -> WebConfig:
         cfg.session_max_age_hours = 8
     if not 1 <= cfg.session_max_age_hours <= 24:
         raise ConfigError("WEB_SESSION_MAX_AGE_HOURS must be between 1 and 24")
+    # T16: бюджет запроса — вне диапазона не угадываем, а падаем в проде (fail-closed
+    # на конфиге, как выше); вне прода — тихий дефолт ради офлайн-тестов.
+    raw_ms = _get(source, "WEB_QUERY_MAX_TIME_MS", "")
+    if raw_ms:
+        try:
+            cfg.query_max_time_ms = int(raw_ms)
+        except ValueError:
+            if cfg.is_production:
+                raise ConfigError("WEB_QUERY_MAX_TIME_MS must be an integer number of milliseconds")
+            cfg.query_max_time_ms = 5000
+    if not 100 <= cfg.query_max_time_ms <= 60000:
+        raise ConfigError("WEB_QUERY_MAX_TIME_MS must be between 100 and 60000")
+    raw_free = _get(source, "WEB_MEDIA_MIN_FREE_BYTES", "")
+    if raw_free:
+        try:
+            cfg.media_min_free_bytes = int(raw_free)
+        except ValueError:
+            if cfg.is_production:
+                raise ConfigError("WEB_MEDIA_MIN_FREE_BYTES must be an integer number of bytes")
+            cfg.media_min_free_bytes = 2 * 1024 * 1024 * 1024
+    if cfg.media_min_free_bytes < 0:
+        raise ConfigError("WEB_MEDIA_MIN_FREE_BYTES must be >= 0")
     if validate:
         validate_config(cfg)
     return cfg

@@ -19,6 +19,12 @@ _BOT_GUILD_TTL = 60.0
 _GUILD_RESOURCE_CACHE: dict[tuple[str, str], tuple[float, Any]] = {}
 _GUILD_RESOURCE_TTL = 300.0
 
+# T16 (п.1, L06): без явного таймаута aiohttp ждёт ответ до 5 минут — подвешенный
+# Discord превращал бы запросы в висячие корутины. Подключение — быстрый RTT,
+# полный ответ/загрузка — с запасом на 50 МБ пачку файлов.
+_TIMEOUT_META = aiohttp.ClientTimeout(total=15.0, connect=8.0)
+_TIMEOUT_UPLOAD = aiohttp.ClientTimeout(total=90.0, connect=8.0)
+
 
 class DiscordError(RuntimeError):
     def __init__(self, op: str, status: int, body: str) -> None:
@@ -60,7 +66,9 @@ async def bot_request(
         kwargs = {"data": form}
     else:
         kwargs = {"json": json_body}
-    async with aiohttp.ClientSession(headers=headers) as session:
+    async with aiohttp.ClientSession(
+        headers=headers, timeout=_TIMEOUT_UPLOAD if files else _TIMEOUT_META
+    ) as session:
         async with session.request(method, f"{API}{path}", **kwargs) as response:
             try:
                 payload = await response.json()
@@ -70,7 +78,7 @@ async def bot_request(
 
 
 async def _get_json(url: str, headers: dict[str, str], *, op: str) -> Any:
-    async with aiohttp.ClientSession(headers=headers) as session:
+    async with aiohttp.ClientSession(headers=headers, timeout=_TIMEOUT_META) as session:
         async with session.get(url) as response:
             if response.status >= 400:
                 raise DiscordError(op, response.status, await response.text())
@@ -85,7 +93,7 @@ async def oauth_token(cfg: WebConfig, code: str, redirect_uri: str) -> str:
         "code": code,
         "redirect_uri": redirect_uri,
     }
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(timeout=_TIMEOUT_META) as session:
         async with session.post(f"{API}/oauth2/token", data=data) as response:
             if response.status >= 400:
                 raise DiscordError("oauth_token", response.status, await response.text())

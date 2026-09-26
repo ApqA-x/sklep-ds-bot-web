@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.responses import Response
 
 from . import read as read_api
-from .config import WebConfig, load_config
+from .config import ConfigError, WebConfig, load_config
 from .queries import ensure_web_indexes
 
 API_DIR = Path(__file__).resolve().parent
@@ -54,12 +54,23 @@ def create_app(
     db: object | None = None,
 ) -> FastAPI:
     cfg = config or load_config()
+    if cfg.is_production and (cfg.dev_bypass_auth or not cfg.auth_enabled):
+        # load_config already rejects this; keep the guard so no code path can
+        # start a production app with the auth gate disabled.
+        raise ConfigError(
+            "WEB_ENV=production requires full OAuth/session configuration "
+            "and forbids WEB_DEV_BYPASS_AUTH"
+        )
     logging.basicConfig(
         level=getattr(logging, cfg.log_level, logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
 
     log = logging.getLogger("api")
+    if cfg.dev_bypass_auth:
+        log.warning("auth bypass enabled via WEB_DEV_BYPASS_AUTH (mode=%s); never expose this instance", cfg.app_env)
+    elif not cfg.auth_enabled and not cfg.is_production:
+        log.warning("auth gate disabled: OAuth/session config incomplete (mode=%s)", cfg.app_env)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -125,6 +136,7 @@ def create_app(
             "status": "ok" if mongo["ok"] else "degraded",
             "service": "web",
             "version": VERSION,
+            "env": cfg.app_env,
             "mongo": mongo,
             "auth_enabled": cfg.auth_enabled,
         }

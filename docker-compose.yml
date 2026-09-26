@@ -13,6 +13,10 @@ services:
       # наружный порт на хосте можно сменить: WEB_HOST_PORT=8081 docker compose up
       - "127.0.0.1:${WEB_HOST_PORT:-8000}:8000"
     environment:
+      # ВРЕМЕННО: локальный стенд Windows без OAuth (решение D08 не принято).
+      # Образ по умолчанию production; production-файл compose с реальными секретами
+      # и guild allowlist готовится в T13/T18. Не выкатывать этот файл на Linux-прод.
+      WEB_ENV: ${WEB_ENV:-development}
       MONGO_URI: ${MONGO_URI:-mongodb://mongo:27017}
       MONGO_DB: ${MONGO_DB:-voice_tracker}
       # для проверки этапа 5 (бот-действия) — пусто = функция выключена

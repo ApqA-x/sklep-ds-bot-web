@@ -117,11 +117,11 @@ workflow `publish.yml` соберёт `ghcr.io/apqa-x/sklep-ds-bot-web:0.1.0` (+
 ## Чеклист прода-выката (этап 7, выполняется на Swarm-хосте)
 
 1. Discord Developer Portal: у приложения включить OAuth2, redirect URI `https://<домен>/api/auth/callback`, скопировать client id/secret.
-2. В `bot/.env` добавить: `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`, `WEB_SESSION_SECRET` (32+ случайных байт, например `openssl rand -hex 32`), `WEB_PUBLIC_URL`.
+2. В окружение web добавить: `WEB_ENV=production` (значение по умолчанию, если переменная не задана), `DISCORD_TOKEN`, `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI` (или `WEB_PUBLIC_URL` — redirect соберётся из него), `WEB_SESSION_SECRET` (≥32 символов, например `openssl rand -hex 32`), `WEB_PUBLIC_URL`. При нехватке любой обязательной переменной в production приложение не стартует и пишет список недостающих имён (значения не логируются).
 3. Запушить тег образа и заменить `:latest` на `v*` в `bot/docker-stack.yaml`: `image: ghcr.io/apqa-x/sklep-ds-bot-web:v0.1.0`.
 4. Картинки чата (опционально): на хосте `docker volume create dsbot-media`; в стеке — `MEDIA_DIR=/data/media` + монтирование тома gateway (rw) и web (ro). Без этого `/media` выключен, UI отдаёт ссылки Discord.
 5. Reverse proxy (Caddy/nginx/Traefik): TLS для `<домен>` → `web:8000` (сеть оверлея). Наружу публикация порта **не** нужна. Для вложений в «Отправить от бота» (до 25 МБ на файл, до 50 МБ на запрос) поднять лимит тела: nginx — `client_max_body_size 52m;`, Caddy — `request_body { max_size 52428800 }`.
 6. `docker stack deploy -c docker-stack.yaml bot`.
 7. Проверка: `curl https://<домен>/api/healthz` → `status: ok`; вход через Discord; сервер виден только если пользователь в нём и имеет Manage Guild.
 
-Пока `DISCORD_CLIENT_*`/`WEB_SESSION_SECRET` не заданы, сайт работает в dev-режиме (без авторизации) — в проде не публиковать порт наружу до шага 2.
+Dev-режим (без авторизации) возможен только при явном `WEB_ENV=development|test` — локальный `docker-compose.yml` фиксирует development сам. В production-режиме незакрытая конфигурация = отказ старта, а не анонимный доступ.

@@ -87,7 +87,13 @@ def actor_of(request: Request) -> dict[str, str]:
 
 
 def _redirect_uri(cfg: WebConfig, request: Request) -> str:
-    return cfg.discord_redirect_uri or str(request.url_for("auth_callback"))
+    # Never derive the OAuth callback from the request Host/forwarded headers:
+    # a spoofed host must not redirect Discord's code parameter to another origin.
+    if cfg.discord_redirect_uri:
+        return cfg.discord_redirect_uri
+    if cfg.web_public_url:
+        return cfg.web_public_url.rstrip("/") + "/api/auth/callback"
+    return str(request.url_for("auth_callback"))
 
 
 def _is_https(cfg: WebConfig) -> bool:

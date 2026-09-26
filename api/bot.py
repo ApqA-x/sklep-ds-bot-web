@@ -15,7 +15,7 @@ try:  # в starlette 0.40 исключение живёт в formparsers, в б�
 except ImportError:
     from starlette.exceptions import MultiPartException
 
-from . import discord_api, mutations
+from . import discord_api, mutations, operations
 from .auth import actor_of, perms_for, require_guild_admin
 from .config import WebConfig
 from .models import (
@@ -205,25 +205,121 @@ def _guard_stream(request: Request) -> None:
     request._receive = receive
 
 
-def _finish(request: Request, action: str, arguments: dict[str, Any], status: int, payload: Any) -> dict:
+def _op_key(request: Request) -> str:
+    """Ключ идемпотентности присылает клиент (T08.9): повтор доставки — прежний key,
+    новая попытка — новый. Без заголовка journal ведёт per-attempt (dedup невозможен)."""
+    key = request.headers.get("idempotency-key", "").strip()
+    return key or operations.new_id()
+
+
+def _audit(
+    db: Any,
+    guild: str,
+    actor: dict[str, str],
+    action: str,
+    arguments: dict[str, Any],
+    *,
+    status: int | None,
+    detail: Any,
+    ok: bool,
+    op_id: str,
+) -> None:
+    """O08: факт операции устойчив уже к этому моменту; сбой audit-проекции остаётся
+    видимым (auditError на документе), а не маскируется под полный успех."""
+    try:
+        mutations.record_audit(
+            db,
+            guild_id=guild,
+            actor=actor,
+            action=f"bot.{action}",
+            after={**arguments, "discordStatus": status, "detail": detail if not ok else None},
+            ok=ok,
+            origin="web",  # инициатор — веб-интерфейс; Discord здесь только транспорт исполнения
+            operation_id=op_id,
+        )
+    except Exception:  # noqa: BLE001 — сбой проекции не должен превращать выполненный эффект в 500
+        operations.mark_audit_error(db, op_id)
+
+
+async def _action(
+    request: Request,
+    kind: str,
+    action: str,
+    arguments: dict[str, Any],
+    run: Any,
+) -> dict:
+    """T08: устойчивый intent → атомарный claim → внешний эффект → финал.
+
+    Ни один вызов Discord не происходит до успешной записи намерения (O01).
+    Повтор терминальной операции возвращает сохранённый факт без нового эффекта (O04);
+    unknown не переигрывается вслепую (O05); lease/fencing — в operations.claim/finish.
+    """
     db = request.app.state.db
     if db is None:
         raise HTTPException(status_code=503, detail="database unavailable")
     guild = _guild(request)
-    ok = 200 <= status < 300
-    detail = payload if isinstance(payload, dict) else {"raw": str(payload)[:300]}
-    mutations.record_audit(
+    actor = actor_of(request)
+    doc, _created = operations.create_intent(
         db,
         guild_id=guild,
-        actor=actor_of(request),
-        action=f"bot.{action}",
-        after={**arguments, "discordStatus": status, "detail": detail if not ok else None},
-        ok=ok,
-        origin="web",  # инициатор — веб-интерфейс; Discord здесь только транспорт исполнения
+        actor=actor,
+        kind=kind,
+        arguments=arguments,
+        idempotency_key=_op_key(request),
+        batch_id=request.headers.get("x-batch-id") or None,
     )
+    op_id = doc["_id"]
+    if doc.get("state") in operations.TERMINAL:
+        view = operations.public_view(doc)
+        replayed = {"ok": doc["state"] == "succeeded", "operationId": op_id, "replayed": True,
+                    "state": doc["state"], "result": view["result"], "error": view["error"]}
+        if doc["state"] == "succeeded":
+            replayed["discordStatus"] = (doc.get("result") or {}).get("discordStatus")
+            return replayed
+        if doc["state"] == "failed":
+            saved = doc.get("error") or {}
+            raise HTTPException(status_code=502, detail={**saved, "operationId": op_id, "replayed": True})
+        raise HTTPException(status_code=504, detail={"error": "outcome_unproven", **replayed})
+    claimed_pair = operations.claim(db, op_id)
+    if claimed_pair is None:
+        raise HTTPException(status_code=409, detail={"error": "operation_in_progress", "operationId": op_id})
+    claimed, mode = claimed_pair
+    if mode == "takeover" and not operations.is_idempotent(kind):
+        # O07: переживший lease не доказывает ни эффект, ни его отсутствие;
+        # для неидемпотентного kind слепой повтор запрещён — остаёмся unknown.
+        operations.finish(db, op_id, claimed, "unknown", error={"classification": "lease_expired_unproven"})
+        _audit(db, guild, actor, action, arguments, status=None,
+               detail={"classification": "lease_expired_unproven"}, ok=False, op_id=op_id)
+        raise HTTPException(status_code=504, detail={"error": "outcome_unproven", "operationId": op_id, "state": "unknown"})
+    try:
+        status, payload = await run()
+    except HTTPException:
+        # эффект не отправлялся (лимит/конфиг) — попытка честная, но без внешнего вызова
+        operations.finish(db, op_id, claimed, "failed", error={"classification": "not_dispatched"})
+        raise
+    except Exception as exc:  # noqa: BLE001 — транспорт: distinguish «не ушло» vs «неизвестно» (O05/O06)
+        classification, definitely_no_effect = operations.classify_transport(exc)
+        state = "failed" if definitely_no_effect else "unknown"
+        operations.finish(db, op_id, claimed, state, error={"classification": classification})
+        _audit(db, guild, actor, action, arguments, status=None,
+               detail={"classification": classification}, ok=False, op_id=op_id)
+        raise HTTPException(
+            status_code=504, detail={"error": classification, "operationId": op_id, "state": state}
+        ) from exc
+    ok = 200 <= status < 300
+    detail = payload if isinstance(payload, dict) else {"raw": str(payload)[:300]}
+    if ok:
+        result: dict[str, Any] = {"discordStatus": status}
+        resource_id = detail.get("id") if isinstance(detail, dict) else None
+        if resource_id:
+            result["discordResourceId"] = str(resource_id)  # T08.7: зацепка для ручной сверки
+        operations.finish(db, op_id, claimed, "succeeded", result=result)
+    else:
+        operations.finish(db, op_id, claimed, "failed", error={"discordStatus": status, "body": detail})
+    _audit(db, guild, actor, action, arguments, status=status, detail=detail, ok=ok, op_id=op_id)
     if not ok:
-        raise HTTPException(status_code=502, detail={"discordStatus": status, "body": detail})
-    return {"ok": True, "discordStatus": status}
+        raise HTTPException(status_code=502, detail={"discordStatus": status, "body": detail, "operationId": op_id})
+    return {"ok": True, "discordStatus": status, "operationId": op_id, "state": "succeeded"}
 
 
 @router.post("/member/{userId}/roles")
@@ -233,8 +329,13 @@ async def member_role(request: Request, guildId: str, userId: str, body: MemberR
     await _check_member(request, guildId, userId)
     await _check_role(request, guildId, body.roleId)
     method = "PUT" if body.action == "grant" else "DELETE"
-    status, payload = await _call(request, method, f"/guilds/{guildId}/members/{userId}/roles/{body.roleId}")
-    return _finish(request, "role", {"userId": userId, "roleId": body.roleId, "action": body.action}, status, payload)
+    return await _action(
+        request,
+        f"bot.role.{body.action}",
+        "role",
+        {"userId": userId, "roleId": body.roleId, "action": body.action},
+        lambda: _call(request, method, f"/guilds/{guildId}/members/{userId}/roles/{body.roleId}"),
+    )
 
 
 @router.post("/member/{userId}/timeout")
@@ -247,10 +348,15 @@ async def member_timeout(request: Request, guildId: str, userId: str, body: Time
         json_body: dict[str, Any] | None = {"communication_disabled_until": until}
     else:
         json_body = {"communication_disabled_until": None}
-    status, payload = await _call(
-        request, "PATCH", f"/guilds/{guildId}/members/{userId}", json_body=json_body, reason="voice_tracker web"
+    return await _action(
+        request,
+        "bot.timeout.set" if body.mute else "bot.timeout.clear",
+        "timeout",
+        {"userId": userId, "mute": body.mute, "seconds": body.seconds if body.mute else None},
+        lambda: _call(
+            request, "PATCH", f"/guilds/{guildId}/members/{userId}", json_body=json_body, reason="voice_tracker web"
+        ),
     )
-    return _finish(request, "timeout", {"userId": userId, "mute": body.mute, "seconds": body.seconds if body.mute else None}, status, payload)
 
 
 @router.post("/member/{userId}/move")
@@ -259,13 +365,18 @@ async def member_move(request: Request, guildId: str, userId: str, body: MoveMem
     _snowflake(userId, "userId")
     await _check_member(request, guildId, userId)
     await _check_channel(request, guildId, body.channelId, types=VOICE_TARGET_TYPES)
-    status, payload = await _call(
+    return await _action(
         request,
-        "PATCH",
-        f"/guilds/{guildId}/members/{userId}",
-        json_body={"channel_id": body.channelId},
+        "bot.move",
+        "move",
+        {"userId": userId, "channelId": body.channelId},
+        lambda: _call(
+            request,
+            "PATCH",
+            f"/guilds/{guildId}/members/{userId}",
+            json_body={"channel_id": body.channelId},
+        ),
     )
-    return _finish(request, "move", {"userId": userId, "channelId": body.channelId}, status, payload)
 
 
 @router.post("/member/{userId}/disconnect")
@@ -273,13 +384,18 @@ async def member_disconnect(request: Request, guildId: str, userId: str) -> dict
     _snowflake(guildId, "guildId")
     _snowflake(userId, "userId")
     await _check_member(request, guildId, userId)
-    status, payload = await _call(
+    return await _action(
         request,
-        "PATCH",
-        f"/guilds/{guildId}/members/{userId}",
-        json_body={"channel_id": None},
+        "bot.disconnect",
+        "disconnect",
+        {"userId": userId},
+        lambda: _call(
+            request,
+            "PATCH",
+            f"/guilds/{guildId}/members/{userId}",
+            json_body={"channel_id": None},
+        ),
     )
-    return _finish(request, "disconnect", {"userId": userId}, status, payload)
 
 
 @router.post("/member/{userId}/kick")
@@ -290,10 +406,13 @@ async def member_kick(request: Request, guildId: str, userId: str, body: KickMem
     perms = await perms_for(request, guildId)
     if not perms & (1 << 3 | KICK_MEMBERS):
         raise HTTPException(status_code=403, detail="kick requires administrator or kick members")
-    status, payload = await _call(
-        request, "DELETE", f"/guilds/{guildId}/members/{userId}", reason=body.reason
+    return await _action(
+        request,
+        "bot.kick",
+        "kick",
+        {"userId": userId, "reason": body.reason},
+        lambda: _call(request, "DELETE", f"/guilds/{guildId}/members/{userId}", reason=body.reason),
     )
-    return _finish(request, "kick", {"userId": userId, "reason": body.reason}, status, payload)
 
 
 @router.post("/channel/{channelId}/message")
@@ -331,15 +450,20 @@ async def channel_message(request: Request, guildId: str, channelId: str) -> dic
     if files:
         # в audit — только имена и размеры, не содержимое
         arguments["attachments"] = [{"name": name, "size": len(blob)} for name, blob, _ in files]
-    status, payload = await _call(
+    return await _action(
         request,
-        "POST",
-        f"/channels/{channelId}/messages",
-        json_body=json_body or None,
-        files=files or None,
-        billed=True,
+        "bot.message",
+        "message",
+        arguments,
+        lambda: _call(
+            request,
+            "POST",
+            f"/channels/{channelId}/messages",
+            json_body=json_body or None,
+            files=files or None,
+            billed=True,
+        ),
     )
-    return _finish(request, "message", arguments, status, payload)
 
 
 async def _message_body(request: Request) -> tuple[str, EmbedSpec | None, list[tuple[str, bytes, str]]]:
@@ -392,13 +516,18 @@ async def create_invite(request: Request, guildId: str, body: InviteCreateAction
     _snowflake(guildId, "guildId")
     _snowflake(body.channelId, "channelId")
     await _check_channel(request, guildId, body.channelId)
-    status, payload = await _call(
+    return await _action(
         request,
-        "POST",
-        f"/channels/{body.channelId}/invites",
-        json_body={"max_age": body.maxAge, "max_uses": body.maxUses},
+        "bot.invite.create",
+        "invite.create",
+        {"channelId": body.channelId, "maxAge": body.maxAge, "maxUses": body.maxUses},
+        lambda: _call(
+            request,
+            "POST",
+            f"/channels/{body.channelId}/invites",
+            json_body={"max_age": body.maxAge, "max_uses": body.maxUses},
+        ),
     )
-    return _finish(request, "invite.create", {"channelId": body.channelId}, status, payload)
 
 
 @router.delete("/invite/{code}")
@@ -407,5 +536,33 @@ async def delete_invite(request: Request, guildId: str, code: str) -> dict:
     if not INVITE_CODE_RE.match(code):
         raise HTTPException(status_code=422, detail="invalid invite code")
     await _check_invite(request, guildId, code)
-    status, payload = await _call(request, "DELETE", f"/invites/{code}")
-    return _finish(request, "invite.delete", {"code": code}, status, payload)
+    return await _action(
+        request,
+        "bot.invite.delete",
+        "invite.delete",
+        {"code": code},
+        lambda: _call(request, "DELETE", f"/invites/{code}"),
+    )
+
+
+@router.get("/operations/{operationId}")
+async def operation_status(request: Request, guildId: str, operationId: str) -> dict:
+    """T08.9: защищённое чтение статуса (тот же require_guild_admin + guild-scope T04)."""
+    db = request.app.state.db
+    if db is None:
+        raise HTTPException(status_code=503, detail="database unavailable")
+    doc = operations.get_operation(db, guildId, operationId)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="operation not found")
+    return operations.public_view(doc)
+
+
+@router.get("/operations")
+async def operation_batch(request: Request, guildId: str, batchId: str) -> dict:
+    """O10: батч из нескольких каналов — явные child-статусы, общий success только когда все терминальны."""
+    db = request.app.state.db
+    if db is None:
+        raise HTTPException(status_code=503, detail="database unavailable")
+    views = [operations.public_view(doc) for doc in operations.list_batch(db, guildId, batchId)]
+    pending = [v for v in views if v["state"] not in operations.TERMINAL]
+    return {"batchId": batchId, "operations": views, "complete": not pending, "pending": len(pending)}

@@ -774,6 +774,9 @@ WEB_INDEXES: list[tuple[str, list[tuple[str, int]], str]] = [
     # «тот же ключ под другим именем» (code 85) и пересоздание конфликует
     (COLL_CHAT, [("guildId", 1), ("channelId", 1), ("sentAt", -1)], "chat_guildId_channelId_sentAt"),
     (COLL_CHAT_PRESETS, [("guildId", 1), ("createdAt", 1)], "chat_presets_guildId_createdAt"),
+    # T08: выборка журнала операций по гильдии (batch-статусы); дедуп-область — в самом _id
+    ("operations", [("guildId", 1), ("batchId", 1)], "web_operations_guildId_batchId"),
+    ("operations", [("guildId", 1), ("createdAt", -1)], "web_operations_guildId_createdAt"),
 ]
 
 

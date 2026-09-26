@@ -66,11 +66,41 @@ async function apiGet<T>(path: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function apiSend<T>(method: "POST" | "PATCH" | "DELETE", path: string, body?: unknown): Promise<T> {
+// T08.9: каждая попытка bot-действия несёт Idempotency-Key (повтор доставки —
+// прежний key, новая попытка — новый); батч из нескольких каналов добавляет X-Batch-Id.
+export interface OperationOpts {
+  key?: string;
+  batchId?: string;
+}
+
+export interface BotOperationResult {
+  ok: boolean;
+  discordStatus?: number;
+  operationId?: string;
+  state?: string;
+  replayed?: boolean;
+}
+
+export function newOperationKey(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function operationHeaders(operation?: OperationOpts): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (operation?.key) headers["idempotency-key"] = operation.key;
+  if (operation?.batchId) headers["x-batch-id"] = operation.batchId;
+  return headers;
+}
+
+async function apiSend<T>(method: "POST" | "PATCH" | "DELETE", path: string, body?: unknown, operation?: OperationOpts): Promise<T> {
+  const headers: Record<string, string> = { ...operationHeaders(operation) };
+  if (body !== undefined) headers["content-type"] = "application/json";
   const response = await fetch(path, {
     method,
     credentials: "same-origin",
-    headers: body !== undefined ? { "content-type": "application/json" } : undefined,
+    headers: Object.keys(headers).length ? headers : undefined,
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!response.ok) {
@@ -85,8 +115,14 @@ async function apiSend<T>(method: "POST" | "PATCH" | "DELETE", path: string, bod
   return (await response.json()) as T;
 }
 
-async function apiSendForm<T>(method: "POST", path: string, form: FormData): Promise<T> {
-  const response = await fetch(path, { method, credentials: "same-origin", body: form });
+async function apiSendForm<T>(method: "POST", path: string, form: FormData, operation?: OperationOpts): Promise<T> {
+  const headers = operationHeaders(operation);
+  const response = await fetch(path, {
+    method,
+    credentials: "same-origin",
+    headers: Object.keys(headers).length ? headers : undefined,
+    body: form,
+  });
   if (!response.ok) {
     let payload: unknown = null;
     try {
@@ -290,19 +326,44 @@ export const api = {
     ),
 
   botRole: (guildId: string, userId: string, roleId: string, action: "grant" | "revoke") =>
-    apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/member/${userId}/roles`, { roleId, action }),
+    apiSend<BotOperationResult>(
+      "POST",
+      `/api/guild/${guildId}/bot/member/${userId}/roles`,
+      { roleId, action },
+      { key: newOperationKey() },
+    ),
 
   botTimeout: (guildId: string, userId: string, mute: boolean, seconds = 600) =>
-    apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/member/${userId}/timeout`, { mute, seconds }),
+    apiSend<BotOperationResult>(
+      "POST",
+      `/api/guild/${guildId}/bot/member/${userId}/timeout`,
+      { mute, seconds },
+      { key: newOperationKey() },
+    ),
 
   botMove: (guildId: string, userId: string, channelId: string) =>
-    apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/member/${userId}/move`, { channelId }),
+    apiSend<BotOperationResult>(
+      "POST",
+      `/api/guild/${guildId}/bot/member/${userId}/move`,
+      { channelId },
+      { key: newOperationKey() },
+    ),
 
   botDisconnect: (guildId: string, userId: string) =>
-    apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/member/${userId}/disconnect`, {}),
+    apiSend<BotOperationResult>(
+      "POST",
+      `/api/guild/${guildId}/bot/member/${userId}/disconnect`,
+      {},
+      { key: newOperationKey() },
+    ),
 
   botKick: (guildId: string, userId: string, reason: string) =>
-    apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/member/${userId}/kick`, { reason }),
+    apiSend<BotOperationResult>(
+      "POST",
+      `/api/guild/${guildId}/bot/member/${userId}/kick`,
+      { reason },
+      { key: newOperationKey() },
+    ),
 
   botMessage: (
     guildId: string,
@@ -310,21 +371,46 @@ export const api = {
     content: string,
     files: File[] = [],
     embed: EmbedSpec | null = null,
+    operation?: OperationOpts,
   ) => {
+    const opts: OperationOpts = { key: operation?.key ?? newOperationKey(), batchId: operation?.batchId };
     if (files.length === 0 && embed === null)
-      return apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/channel/${channelId}/message`, { content });
+      return apiSend<BotOperationResult>(
+        "POST",
+        `/api/guild/${guildId}/bot/channel/${channelId}/message`,
+        { content },
+        opts,
+      );
     const form = new FormData();
     if (content) form.append("content", content);
     if (embed) form.append("embed", JSON.stringify(embed));
     for (const f of files) form.append("files", f, f.name);
-    return apiSendForm<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/channel/${channelId}/message`, form);
+    return apiSendForm<BotOperationResult>(
+      "POST",
+      `/api/guild/${guildId}/bot/channel/${channelId}/message`,
+      form,
+      opts,
+    );
   },
 
   botInviteCreate: (guildId: string, channelId: string) =>
-    apiSend<{ ok: boolean }>("POST", `/api/guild/${guildId}/bot/invite`, { channelId }),
+    apiSend<BotOperationResult>("POST", `/api/guild/${guildId}/bot/invite`, { channelId }, { key: newOperationKey() }),
 
   botInviteDelete: (guildId: string, code: string) =>
-    apiSend<{ ok: boolean }>("DELETE", `/api/guild/${guildId}/bot/invite/${encodeURIComponent(code)}`),
+    apiSend<BotOperationResult>(
+      "DELETE",
+      `/api/guild/${guildId}/bot/invite/${encodeURIComponent(code)}`,
+      undefined,
+      { key: newOperationKey() },
+    ),
+
+  botOperation: (guildId: string, operationId: string) =>
+    apiGet<BotOperationResult>(`/api/guild/${guildId}/bot/operations/${operationId}`),
+
+  botBatch: (guildId: string, batchId: string) =>
+    apiGet<{ batchId: string; complete: boolean; pending: number; operations: BotOperationResult[] }>(
+      `/api/guild/${guildId}/bot/operations?batchId=${encodeURIComponent(batchId)}`,
+    ),
 };
 
 export function useCanWrite(guildId: string | undefined): boolean {

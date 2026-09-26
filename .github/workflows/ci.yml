@@ -3,6 +3,11 @@ name: ci
 # Тесты веба (api/tests) существовали, но не выполнялись нигде: publish.yml
 # запускается только по тегу и сразу собирает образ. Здесь повторяются ровно те
 # команды, которые идут в Dockerfile, чтобы CI ловил то же, что сломает релиз.
+#
+# T15/п.1-2: Python-зависимости ставятся строго из api/requirements.lock
+# (--require-hashes: каждый пакет сверяется по sha256; резолвинг по диапазонам
+# requirements.txt в CI и в образе больше не расходится). Отдельный
+# requirements-test.lock добавляет к рантайму только pytest/httpx.
 
 on:
   push:
@@ -10,9 +15,17 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+env:
+  UV_VERSION: "0.12.19"
+
 jobs:
   api:
     runs-on: ubuntu-24.04
+    env:
+      UV_PYTHON_PREFERENCE: only-system
     steps:
       - uses: actions/checkout@v7
 
@@ -20,11 +33,62 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Зависимости API + тест-раннер
-        run: pip install -r api/requirements.txt pytest httpx
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Зависимости API + тест-раннер (locked, с хэшами)
+        run: |
+          uv venv
+          uv pip install --python .venv/bin/python --no-cache --require-hashes -r api/requirements-test.lock
 
       - name: pytest
-        run: python -m pytest api/tests -q
+        run: .venv/bin/python -m pytest api/tests -q
+
+  # T15/п.4: интеграционный слой (реальная Mongo на стендовом порту 27099,
+  # тот же stand_guard, что на dev-машине) был только локальным — теперь
+  # обязателен и в CI.
+  integration:
+    name: integration
+    runs-on: ubuntu-24.04
+    env:
+      UV_PYTHON_PREFERENCE: only-system
+      TEST_MONGO_URI: mongodb://127.0.0.1:27099
+    services:
+      mongo-test:
+        image: mongo:7
+        ports:
+          - "27099:27017"
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          version: ${{ env.UV_VERSION }}
+
+      - name: Зависимости (locked, с хэшами)
+        run: |
+          uv venv
+          uv pip install --python .venv/bin/python --no-cache --require-hashes -r api/requirements-test.lock
+
+      - name: Ждём Mongo
+        run: |
+          for i in $(seq 1 30); do
+            if .venv/bin/python -c "import pymongo;print(pymongo.MongoClient('mongodb://127.0.0.1:27099', serverSelectionTimeoutMS=1000).admin.command('ping'))" 2>/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "mongo не поднялся"; exit 1
+
+      - name: pytest -m integration
+        run: .venv/bin/python -m pytest api/tests -q -m integration
 
   ui:
     runs-on: ubuntu-24.04
@@ -44,7 +108,42 @@ jobs:
         working-directory: ui
         run: npm ci
 
+      - name: Логика UI (node:test, U-сценарии)
+        working-directory: ui
+        run: npm test
+
       # build = tsc && vite build
       - name: Сборка UI
         working-directory: ui
         run: npm run build
+
+  # T15/п.3: браузерные тесты критичных U/G-сценариев (auth-gate, данные
+  # лидерборда) против собранного бандла на мокированном API-контракте.
+  # Локально проверено на Linux (chromium 1.55.0); в CI ставим --with-deps.
+  ui-e2e:
+    name: ui-e2e
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: npm ci
+        working-directory: ui
+        run: npm ci
+
+      - name: Сборка UI (preview обслуживает dist)
+        working-directory: ui
+        run: npm run build
+
+      - name: Chromium
+        working-directory: ui
+        run: npx playwright install --with-deps chromium
+
+      - name: Playwright (e2e/app.spec.ts)
+        working-directory: ui
+        run: npx playwright test

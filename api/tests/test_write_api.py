@@ -21,7 +21,7 @@ MANAGE = 1 << 5
 
 def _settings_db(**fields) -> FakeDB:
     db = FakeDB()
-    doc = {"_id": GUILD, "createdAt": datetime(2026, 1, 1, tzinfo=timezone.utc)}
+    doc = {"_id": GUILD, "createdAt": datetime(2026, 1, 1, tzinfo=timezone.utc), "revision": 0}
     doc.update(fields)
     db[queries.COLL_GUILD_SETTINGS] = FakeCollection(queries.COLL_GUILD_SETTINGS, docs=[doc])
     return db
@@ -40,8 +40,7 @@ def test_patch_settings_updates_and_audits() -> None:
     db = _settings_db(trustedUserIds=[USER], updatedAt=datetime(2026, 9, 1, tzinfo=timezone.utc))
     client = _dev_client(db)
     response = client.patch(
-        f"/api/guild/{GUILD}/settings",
-        json={"summaryChannelId": USER, "trackingMode": "specific", "trackedChannelIds": [USER]},
+        f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "summaryChannelId": USER, "trackingMode": "specific", "trackedChannelIds": [USER]},
     )
     assert response.status_code == 200
     body = response.json()
@@ -60,24 +59,23 @@ def test_patch_settings_updates_and_audits() -> None:
 def test_patch_forbids_non_allowlisted_fields() -> None:
     db = _settings_db()
     client = _dev_client(db)
-    response = client.patch(f"/api/guild/{GUILD}/settings", json={"managedVoiceChannelId": "123"})
+    response = client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "managedVoiceChannelId": "123"})
     assert response.status_code == 422
 
 
 def test_patch_rejects_invalid_values() -> None:
     client = _dev_client(_settings_db())
-    assert client.patch(f"/api/guild/{GUILD}/settings", json={"trackingMode": "weird"}).status_code == 422
-    assert client.patch(f"/api/guild/{GUILD}/settings", json={"trustedUserIds": ["not-a-snowflake"]}).status_code == 422
-    assert client.patch(f"/api/guild/{GUILD}/settings", json={"activityEventTypes": ["nope"]}).status_code == 422
-    assert client.patch(f"/api/guild/{GUILD}/settings", json={}).status_code == 422
+    assert client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "trackingMode": "weird"}).status_code == 422
+    assert client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "trustedUserIds": ["not-a-snowflake"]}).status_code == 422
+    assert client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "activityEventTypes": ["nope"]}).status_code == 422
+    assert client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, }).status_code == 422
 
 
 def test_patch_command_access_and_categories() -> None:
     db = _settings_db()
     client = _dev_client(db)
     response = client.patch(
-        f"/api/guild/{GUILD}/settings",
-        json={
+        f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, 
             "commandAccess": {"stalker": "admin", "Jump": "all"},
             "activityCategoryChannelIds": {"join-leave": USER, "messages": USER},
         },
@@ -91,13 +89,13 @@ def test_patch_command_access_and_categories() -> None:
 
 def test_patch_rejects_bad_command_access_and_categories() -> None:
     client = _dev_client(_settings_db())
-    assert client.patch(f"/api/guild/{GUILD}/settings", json={"commandAccess": {"jump": "owner"}}).status_code == 422
-    assert client.patch(f"/api/guild/{GUILD}/settings", json={"commandAccess": {"Bad Name": "all"}}).status_code == 422
+    assert client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "commandAccess": {"jump": "owner"}}).status_code == 422
+    assert client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "commandAccess": {"Bad Name": "all"}}).status_code == 422
     assert client.patch(
-        f"/api/guild/{GUILD}/settings", json={"activityCategoryChannelIds": {"nope": USER}}
+        f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "activityCategoryChannelIds": {"nope": USER}}
     ).status_code == 422
     assert client.patch(
-        f"/api/guild/{GUILD}/settings", json={"activityCategoryChannelIds": {"profile": "not-a-snowflake"}}
+        f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "activityCategoryChannelIds": {"profile": "not-a-snowflake"}}
     ).status_code == 422
 
 
@@ -105,15 +103,16 @@ def test_patch_activity_event_colors() -> None:
     db = _settings_db()
     client = _dev_client(db)
     response = client.patch(
-        f"/api/guild/{GUILD}/settings",
-        json={"activityEventColors": {"member_join": 0x00FF00, "member_leave": 0xED4245}},
+        f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "activityEventColors": {"member_join": 0x00FF00, "member_leave": 0xED4245}},
     )
     assert response.status_code == 200
     call = _update_calls(db, queries.COLL_GUILD_SETTINGS)[-1]
     assert call[3]["$set"]["activityEventColors"] == {"member_join": 0x00FF00, "member_leave": 0xED4245}
-    # пустой словарь = сброс всех кастомных цветов
-    reset = client.patch(f"/api/guild/{GUILD}/settings", json={"activityEventColors": {}})
+    assert response.json()["revision"] == 1
+    # пустой словарь = сброс всех кастомных цветов (на свежей revision)
+    reset = client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 1, "activityEventColors": {}})
     assert reset.status_code == 200
+    assert reset.json()["revision"] == 2
     assert _update_calls(db, queries.COLL_GUILD_SETTINGS)[-1][3]["$set"]["activityEventColors"] == {}
 
 
@@ -121,41 +120,61 @@ def test_patch_rejects_bad_activity_event_colors() -> None:
     client = _dev_client(_settings_db())
     # неизвестный тип события
     assert (
-        client.patch(f"/api/guild/{GUILD}/settings", json={"activityEventColors": {"nope": 255}}).status_code == 422
+        client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "activityEventColors": {"nope": 255}}).status_code == 422
     )
     # цвет вне диапазона RGB
     assert (
-        client.patch(f"/api/guild/{GUILD}/settings", json={"activityEventColors": {"member_join": -1}}).status_code
+        client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "activityEventColors": {"member_join": -1}}).status_code
         == 422
     )
     assert (
         client.patch(
-            f"/api/guild/{GUILD}/settings", json={"activityEventColors": {"member_join": 0x1000000}}
+            f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "activityEventColors": {"member_join": 0x1000000}}
         ).status_code
         == 422
     )
     # не число
     assert (
-        client.patch(f"/api/guild/{GUILD}/settings", json={"activityEventColors": {"member_join": "red"}}).status_code
+        client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "activityEventColors": {"member_join": "red"}}).status_code
         == 422
     )
 
 
-def test_patch_conflict_on_stale_updated_at() -> None:
-    db = _settings_db(updatedAt=datetime(2026, 9, 10, 12, tzinfo=timezone.utc))
+def test_patch_conflict_on_stale_revision() -> None:
+    # S01/S04 (unit-слой): устаревшая revision → 409 с безопасными данными
+    # новой версии; документ не меняется
+    db = _settings_db(updatedAt=datetime(2026, 9, 10, 12, tzinfo=timezone.utc), revision=7)
     client = _dev_client(db)
     response = client.patch(
-        f"/api/guild/{GUILD}/settings",
-        json={"summaryChannelId": USER, "expectedUpdatedAt": "2026-09-01T00:00:00Z"},
+        f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "summaryChannelId": USER},
     )
     assert response.status_code == 409
-    assert len(_update_calls(db, queries.COLL_GUILD_SETTINGS)) == 0
+    detail = response.json()["detail"]
+    assert detail["error"] == "revision_conflict"
+    assert detail["current"]["revision"] == 7
+    doc = db[queries.COLL_GUILD_SETTINGS].docs[0]
+    assert "summaryChannelId" not in doc and doc["revision"] == 7
+
+
+def test_patch_requires_revision_token() -> None:
+    # S04: без токена/не число/отрицательная — 4xx, и никакой записи
+    db = _settings_db()
+    client = _dev_client(db)
+    for body in (
+        {"summaryChannelId": USER},
+        {"summaryChannelId": USER, "expectedRevision": "abc"},
+        {"summaryChannelId": USER, "expectedRevision": -1},
+    ):
+        response = client.patch(f"/api/guild/{GUILD}/settings", json=body)
+        assert response.status_code == 422, body
+    doc = db[queries.COLL_GUILD_SETTINGS].docs[0]
+    assert "summaryChannelId" not in doc
 
 
 def test_patch_creates_missing_settings_doc() -> None:
     db = FakeDB()
     client = _dev_client(db)
-    response = client.patch(f"/api/guild/{GUILD}/settings", json={"trackingMode": "none"})
+    response = client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "trackingMode": "none"})
     assert response.status_code == 200
     assert response.json()["trackingMode"] == "none"
     assert response.json()["guildId"] == GUILD
@@ -390,7 +409,7 @@ def test_chat_preset_remove_scoped_to_guild() -> None:
 def test_audit_page_lists_recent_first() -> None:
     db = _settings_db()
     client = _dev_client(db)
-    client.patch(f"/api/guild/{GUILD}/settings", json={"trackingMode": "none"})
+    client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "trackingMode": "none"})
     client.post(f"/api/guild/{GUILD}/trusted", json={"userId": USER, "action": "add"})
     response = client.get(f"/api/guild/{GUILD}/audit")
     assert response.status_code == 200
@@ -403,7 +422,7 @@ def test_audit_page_lists_recent_first() -> None:
 def test_audit_origin_filter() -> None:
     db = _settings_db()
     client = _dev_client(db)
-    client.patch(f"/api/guild/{GUILD}/settings", json={"trackingMode": "none"})  # origin web
+    client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "trackingMode": "none"})  # origin web
     db[COLL_AUDIT].docs.append(  # имитация записи, выполненной через Discord API
         {
             "guildId": GUILD,
@@ -537,7 +556,7 @@ def test_write_endpoints_require_login_when_auth_enabled() -> None:
     )
     db = _settings_db()
     client = TestClient(create_app(config=cfg, db=db), base_url="https://testserver", follow_redirects=False)
-    assert client.patch(f"/api/guild/{GUILD}/settings", json={"trackingMode": "none"}).status_code == 401
+    assert client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "trackingMode": "none"}).status_code == 401
     assert client.get(f"/api/guild/{GUILD}/audit").status_code == 401
 
 
@@ -588,5 +607,5 @@ def test_manager_denied_entirely_after_d02(logged_in_manager: dict) -> None:
     # reads are closed too, not just writes.
     assert client.get(f"/api/guild/{GUILD}/leaderboard").status_code == 403
     assert client.get(f"/api/guild/{GUILD}/audit").status_code == 403
-    assert client.patch(f"/api/guild/{GUILD}/settings", json={"trackingMode": "none"}).status_code == 403
+    assert client.patch(f"/api/guild/{GUILD}/settings", json={"expectedRevision": 0, "trackingMode": "none"}).status_code == 403
     assert client.post(f"/api/guild/{GUILD}/trusted", json={"userId": USER, "action": "add"}).status_code == 403

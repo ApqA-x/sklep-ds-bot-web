@@ -195,7 +195,7 @@ export type InvitesOverview = {
   byInviter: InviterCount[];
 };
 
-export type GuildSettingsDoc = Record<string, unknown> & { guildId: string };
+export type GuildSettingsDoc = Record<string, unknown> & { guildId: string; revision: number };
 
 export type MemberHit = { userId: string; userName: string };
 

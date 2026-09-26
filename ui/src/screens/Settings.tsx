@@ -318,7 +318,7 @@ export default function Settings() {
     mutationFn: (fields: Record<string, unknown>) =>
       api.patchSettings(guildId, {
         ...fields,
-        expectedUpdatedAt: (query.data?.updatedAt as string | undefined) ?? undefined,
+        expectedRevision: Number((query.data?.revision as number | undefined) ?? 0),
       }),
     onSuccess: () => {
       setNotice("сохранено");

@@ -43,6 +43,8 @@ _buckets: dict[str, tuple[float, float]] = {}
 MAX_FILES = 10
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_TOTAL_BYTES = 50 * 1024 * 1024
+# L01: потолок всего HTTP-тела (пачка файлов + overhead multipart/embed)
+MAX_BODY_BYTES = MAX_TOTAL_BYTES + 4 * 1024 * 1024
 
 KICK_MEMBERS = 1 << 2
 SNOWFLAKE_RE = re.compile(r"^\d{5,25}$")
@@ -86,11 +88,13 @@ async def _call(
     json_body: dict | None = None,
     reason: str | None = None,
     files: list[tuple[str, bytes, str]] | None = None,
+    billed: bool = False,
 ):
     cfg = _cfg(request)
     if not cfg.discord_token:
         raise HTTPException(status_code=503, detail="bot token not configured")
-    if not _allow(_guild(request)):
+    # billed=True: токен rate-limit уже списан до дорогого парсинга тела (L02)
+    if not billed and not _allow(_guild(request)):
         raise HTTPException(status_code=429, detail="too many bot actions, slow down")
     return await discord_api.bot_request(cfg, method, path, json_body=json_body, reason=reason, files=files)
 
@@ -177,6 +181,28 @@ async def _check_invite(request: Request, guild_id: str, code: str) -> None:
 
 TEXTISH_CHANNEL_TYPES = (0, 5, 10, 11, 12)  # text/announcement + треды
 VOICE_TARGET_TYPES = (2, 13)  # voice + stage
+
+
+class _BodyTooLarge(Exception):
+    """Внутренний сигнал: поток превысил MAX_BODY_BYTES (L01)."""
+
+
+def _guard_stream(request: Request) -> None:
+    """Считать фактические байты тела: работает и при chunked, и при ложном
+    Content-Length — лимит применяется по мере чтения, а не после."""
+    total = 0
+    original_receive = request.receive
+
+    async def receive():
+        nonlocal total
+        message = await original_receive()
+        if message.get("type") == "http.request":
+            total += len(message.get("body", b""))
+            if total > MAX_BODY_BYTES:
+                raise _BodyTooLarge()
+        return message
+
+    request._receive = receive
 
 
 def _finish(request: Request, action: str, arguments: dict[str, Any], status: int, payload: Any) -> dict:
@@ -274,8 +300,18 @@ async def member_kick(request: Request, guildId: str, userId: str, body: KickMem
 async def channel_message(request: Request, guildId: str, channelId: str) -> dict:
     _snowflake(guildId, "guildId")
     _snowflake(channelId, "channelId")
+    # L01/L02: дешёвые границы и rate-limit ДО парсинга дорогого тела
+    declared = request.headers.get("content-length", "")
+    if declared.isdigit() and int(declared) > MAX_BODY_BYTES:
+        raise HTTPException(status_code=413, detail="request body too large")
+    if not _allow(guildId):
+        raise HTTPException(status_code=429, detail="too many bot actions, slow down")
+    _guard_stream(request)
     await _check_channel(request, guildId, channelId, types=TEXTISH_CHANNEL_TYPES)
-    content, embed, files = await _message_body(request)
+    try:
+        content, embed, files = await _message_body(request)
+    except _BodyTooLarge:
+        raise HTTPException(status_code=413, detail="request body too large") from None
     json_body: dict[str, Any] = {}
     if content:
         json_body["content"] = content
@@ -296,7 +332,12 @@ async def channel_message(request: Request, guildId: str, channelId: str) -> dic
         # в audit — только имена и размеры, не содержимое
         arguments["attachments"] = [{"name": name, "size": len(blob)} for name, blob, _ in files]
     status, payload = await _call(
-        request, "POST", f"/channels/{channelId}/messages", json_body=json_body or None, files=files or None
+        request,
+        "POST",
+        f"/channels/{channelId}/messages",
+        json_body=json_body or None,
+        files=files or None,
+        billed=True,
     )
     return _finish(request, "message", arguments, status, payload)
 
@@ -312,7 +353,8 @@ async def _message_body(request: Request) -> tuple[str, EmbedSpec | None, list[t
         return body.content or "", body.embed, []
 
     try:
-        form = await request.form(max_files=MAX_FILES + 1)
+        # max_files на 1 больше: лишний файл — предсказуемый 422, а не 500 от starlette
+        form = await request.form(max_files=MAX_FILES + 1, max_fields=32)
     except MultiPartException:
         raise HTTPException(status_code=422, detail="invalid multipart body") from None
     content = str(form.get("content") or "").strip()
@@ -334,7 +376,8 @@ async def _message_body(request: Request) -> tuple[str, EmbedSpec | None, list[t
     files: list[tuple[str, bytes, str]] = []
     total = 0
     for up in uploads:
-        blob = await up.read()
+        # читаем с порогом: файл больше лимита не затопит память (L01)
+        blob = await up.read(MAX_FILE_BYTES + 1)
         if len(blob) > MAX_FILE_BYTES:
             raise HTTPException(status_code=422, detail=f"file {up.filename!r} exceeds {MAX_FILE_BYTES} bytes")
         total += len(blob)

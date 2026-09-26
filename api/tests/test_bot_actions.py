@@ -515,7 +515,10 @@ def test_message_embed_missing_attachment(files_calls: list[dict]) -> None:
     assert not files_calls
 
 
-def test_message_embed_validation(calls: list[dict]) -> None:
+def test_message_embed_validation(calls: list[dict], monkeypatch: pytest.MonkeyPatch) -> None:
+    # L02: message-запрос списывает токен до парсинга — поднимаем ёмкость, чтобы
+    # 7 невалидных тел проверили именно 422, а не уперлись в rate-limit
+    monkeypatch.setattr(bot_module, "_BUCKET_CAPACITY", 20.0)
     client = _client()
     url = f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message"
     # пустой embed без текста
@@ -530,6 +533,48 @@ def test_message_embed_validation(calls: list[dict]) -> None:
     # неизвестное поле
     assert client.post(url, json={"embed": {"fields": []}}).status_code == 422
     assert not calls
+
+
+# L01: oversize отсекается до парсинга; ложный Content-Length не обманывает счётчик.
+def test_l01_oversized_body_rejected_early(
+    files_calls: list[dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(bot_module, "MAX_BODY_BYTES", 1024)
+    client = _client()
+    url = f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message"
+    # честный Content-Length больше лимита → 413 до чтения тела
+    assert client.post(url, data={"content": "x" * 5000}).status_code == 413
+    # ложный/отсутствующий Content-Length (chunked): считаем фактические байты
+    def chunks():
+        for _ in range(10):
+            yield b"y" * 300
+
+    response = client.post(
+        url,
+        content=chunks(),
+        headers={
+            "content-type": "multipart/form-data; boundary=b",
+            "transfer-encoding": "chunked",
+        },
+    )
+    assert response.status_code in (413, 422)
+    assert _only_mutations(files_calls) == []
+
+
+def _only_mutations(recorded: list[dict]) -> list[dict]:
+    return recorded  # фикстуры и так пишут только изменяющие вызовы
+
+
+# L02: burst больших запросов — rate-limit срабатывает до дорогой загрузки тела.
+def test_l02_rate_limit_before_body_parse(
+    files_calls: list[dict], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client = _client()
+    url = f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message"
+    statuses = [client.post(url, json={"content": "m" + str(i)}).status_code for i in range(8)]
+    assert statuses[-1] == 429
+    assert statuses.count(200) == 5  # token списан один раз на запрос (billed)
+    assert len(files_calls) == 5
 
 
 def test_write_router_admin_gate_blocks_reads_too() -> None:

@@ -133,8 +133,10 @@ def _store(db: Any, guild: str, entries: list[dict[str, Any]]) -> int:
 def _scan_bounds(db: Any, guild: str) -> tuple[str, str]:
     """(max entryId, min entryId) уже сохранённого — bootstrap для установок, где
     состояние заводилось старым кодом. Полный проход один раз на гильдию."""
+    from .limits import timeout_kwargs
+
     head = low = 0
-    for doc in db[COLL_DISCORD_AUDIT].find({"guildId": guild}, {"entryId": 1}):
+    for doc in db[COLL_DISCORD_AUDIT].find({"guildId": guild}, {"entryId": 1}, **timeout_kwargs()):
         v = _sid(doc.get("entryId"))
         if v:
             head = max(head, v)
@@ -225,20 +227,22 @@ async def sync_guild(db: Any, cfg: Any, guild: str, *, scan_pages: int = SCAN_PA
 async def _sync_locked(db: Any, cfg: Any, guild: str, scan_pages: int) -> dict[str, Any]:
     from . import discord_api
 
+    # T16 п.3: pymongo синхронный; все DB-операции фона/ручной кнопки уходят в
+    # thread — медленная Mongo не должна останавливать event loop целого процесса.
     # состояние существует до захвата lease: CAS-апдейт не создаёт документов
-    load_state(db, guild)
+    await asyncio.to_thread(load_state, db, guild)
     owner = _owner_id()
-    if not _acquire_lease(db, guild, owner):
-        return {"ok": True, "skipped": "lease-held", "discordStatus": 200, "inserted": 0,
-                **status_snapshot(db, guild)}
+    if not await asyncio.to_thread(_acquire_lease, db, guild, owner):
+        snapshot = await asyncio.to_thread(status_snapshot, db, guild)
+        return {"ok": True, "skipped": "lease-held", "discordStatus": 200, "inserted": 0, **snapshot}
     try:
         return await _run(db, cfg, guild, owner, scan_pages, discord_api)
     finally:
-        _release_lease(db, guild, owner)
+        await asyncio.to_thread(_release_lease, db, guild, owner)
 
 
 async def _run(db: Any, cfg: Any, guild: str, owner: str, scan_pages: int, discord_api: Any) -> dict[str, Any]:
-    state = load_state(db, guild)
+    state = await asyncio.to_thread(load_state, db, guild)
     head = _sid(state.get("freshCursor"))
     cursor = _sid(state.get("backfillCursor"))
     complete = bool(state.get("backfillComplete"))
@@ -247,6 +251,9 @@ async def _run(db: Any, cfg: Any, guild: str, owner: str, scan_pages: int, disco
     async def fetch(path: str) -> tuple[int, Any]:
         return await discord_api.bot_request(cfg, "GET", f"/guilds/{guild}/audit-logs{path}")
 
+    async def db_status() -> dict[str, Any]:
+        return await asyncio.to_thread(status_snapshot, db, guild)
+
     async def fail(status: int) -> dict[str, Any]:
         patch: dict[str, Any] = {"lastError": {"status": int(status), "at": _now()}}
         if status == 403:
@@ -254,9 +261,8 @@ async def _run(db: Any, cfg: Any, guild: str, owner: str, scan_pages: int, disco
             log.info("audit sync guild=%s: нет доступа к журналу (403)", guild)
         else:
             log.warning("audit sync guild=%s: discord status %s", guild, status)
-        _write_state(db, guild, patch)
-        return {"ok": False, "discordStatus": int(status), "inserted": inserted,
-                **status_snapshot(db, guild)}
+        await asyncio.to_thread(_write_state, db, guild, patch)
+        return {"ok": False, "discordStatus": int(status), "inserted": inserted, **(await db_status())}
 
     # 1) свежее окно: верх доступной истории (без after= — параметр не документирован)
     status, payload = await fetch(f"?limit={PAGE_LIMIT}")
@@ -267,7 +273,7 @@ async def _run(db: Any, cfg: Any, guild: str, owner: str, scan_pages: int, disco
     # иначе гильдия с пустым журналом навечно осталась бы «отстающей»
     patch: dict[str, Any] = {"lastSuccessAt": _now(), "accessDenied": False, "lastError": None}
     if entries:
-        inserted += _store(db, guild, entries)  # вся страница сохранена — теперь можно чекпоинт (H07)
+        inserted += await asyncio.to_thread(_store, db, guild, entries)  # вся страница сохранена — чекпоинт (H07)
         ids = [_sid(e.get("id")) for e in entries]
         wmin, wmax = min(ids), max(ids)
         patch["freshCursor"] = str(max(head, wmax))
@@ -288,7 +294,7 @@ async def _run(db: Any, cfg: Any, guild: str, owner: str, scan_pages: int, disco
         patch["backfillComplete"] = True
     # head = максимальный сохранённый entryId; инвариант: (backfillCursor, head] сохранён,
     # ниже backfillCursor — неизвестно (перескан после reopen идемпотентен через dedup)
-    _write_state(db, guild, patch, owner=owner)
+    await asyncio.to_thread(_write_state, db, guild, patch, owner=owner)
 
     # 2) scan/backfill: от checkpoint назад, пока Discord отдаёт непустые страницы
     pages = 0
@@ -301,25 +307,26 @@ async def _run(db: Any, cfg: Any, guild: str, owner: str, scan_pages: int, disco
         if not entries:
             # единственный честный сигнал «досканили до низа доступной истории» (H06)
             complete = True
-            _write_state(db, guild, {
-                "backfillComplete": True, "lastSuccessAt": _now(),
-                "accessDenied": False, "lastError": None,
-            }, owner=owner)
+            await asyncio.to_thread(
+                _write_state, db, guild,
+                {"backfillComplete": True, "lastSuccessAt": _now(),
+                 "accessDenied": False, "lastError": None},
+                owner=owner,
+            )
             break
-        inserted += _store(db, guild, entries)
+        inserted += await asyncio.to_thread(_store, db, guild, entries)
         new_min = min(_sid(e.get("id")) for e in entries)
         patch = {"backfillCursor": str(new_min), "lastSuccessAt": _now(),
                  "accessDenied": False, "lastError": None}
         if new_min >= cursor:
             # before= обязан отдавать строго более старых; нет движения → стоп без
             # объявления полноты (защита от зацикливания на аномальном ответе)
-            _write_state(db, guild, patch, owner=owner)
+            await asyncio.to_thread(_write_state, db, guild, patch, owner=owner)
             break
         cursor = new_min
-        _write_state(db, guild, patch, owner=owner)
+        await asyncio.to_thread(_write_state, db, guild, patch, owner=owner)
 
-    return {"ok": True, "discordStatus": 200, "inserted": inserted,
-            **status_snapshot(db, guild)}
+    return {"ok": True, "discordStatus": 200, "inserted": inserted, **(await db_status())}
 
 
 # ------------------------------------------------------------------ наблюдаемость
@@ -327,8 +334,10 @@ async def _run(db: Any, cfg: Any, guild: str, owner: str, scan_pages: int, disco
 
 def status_snapshot(db: Any, guild: str) -> dict[str, Any]:
     """Честная сводка для UI/эндпоинта: полнота, задержка, ошибки, доступ."""
+    from .limits import command_timeout_kwargs
+
     doc = db[COLL_AUDIT_STATE].find_one({"guildId": guild}) or {}
-    total = int(db[COLL_DISCORD_AUDIT].count_documents({"guildId": guild}))
+    total = int(db[COLL_DISCORD_AUDIT].count_documents({"guildId": guild}, **command_timeout_kwargs()))
     last = _as_utc(doc.get("lastSuccessAt"))
     age = (_now() - last).total_seconds() if last else None
     access_denied = bool(doc.get("accessDenied"))
@@ -349,8 +358,10 @@ def status_snapshot(db: Any, guild: str) -> dict[str, Any]:
 
 
 def known_guilds(db: Any) -> list[str]:
+    from .limits import timeout_kwargs
+
     guilds: list[str] = []
-    for doc in db[COLL_GUILD_SETTINGS].find({}, {"guildId": 1}):
+    for doc in db[COLL_GUILD_SETTINGS].find({}, {"guildId": 1}, **timeout_kwargs()):
         gid = str(doc.get("guildId") or doc.get("_id") or "")
         if gid and gid not in guilds:
             guilds.append(gid)
@@ -370,7 +381,7 @@ async def run_loop(app: Any, on_cycle: Any = None) -> None:
             cfg = getattr(app.state, "config", None)
             if db is None or cfg is None or not cfg.discord_token:
                 continue
-            for guild in known_guilds(db):
+            for guild in await asyncio.to_thread(known_guilds, db):
                 await sync_guild(db, cfg, guild)
         except asyncio.CancelledError:
             raise

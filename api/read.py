@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import re
 import uuid
 from datetime import datetime, timezone
@@ -7,7 +8,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
-from . import discord_api, queries
+from . import discord_api, limits, queries
 from .auth import require_guild_read
 
 router = APIRouter(
@@ -46,7 +47,7 @@ def _period(value: str) -> str:
     return value
 
 
-@router.get("/leaderboard")
+@router.get("/leaderboard", dependencies=[Depends(limits.gate("leaderboard"))])
 def get_leaderboard(
     request: Request,
     guildId: str,
@@ -70,7 +71,7 @@ def get_leaderboard(
     }
 
 
-@router.get("/chat-leaderboard")
+@router.get("/chat-leaderboard", dependencies=[Depends(limits.gate("chat-leaderboard"))])
 def get_chat_leaderboard(
     request: Request,
     guildId: str,
@@ -105,7 +106,8 @@ def get_sessions_history(
     request: Request,
     guildId: str,
     status: str = Query("closed"),
-    page: int = Query(1, ge=1),
+    # L04: deep skip (page→skip) дорог так же, как большой limit — потолок предсказуем
+    page: int = Query(1, ge=1, le=200),
     size: int = Query(25, ge=1, le=100),
 ) -> dict:
     guild = _snowflake(guildId, "guildId")
@@ -142,7 +144,7 @@ def get_user_profile(
     return profile
 
 
-@router.get("/invites")
+@router.get("/invites", dependencies=[Depends(limits.gate("invites"))])
 def get_invites(request: Request, guildId: str, period: str = Query("30d")) -> dict:
     guild = _snowflake(guildId, "guildId")
     _period(period)
@@ -204,42 +206,51 @@ async def user_card(request: Request, guildId: str, userId: str) -> dict:
     """
     guild = _snowflake(guildId, "guildId")
     user = _snowflake(userId, "userId")
+    from . import discord_api
+
     cfg = request.app.state.config
     db = _db(request)
-    now = datetime.now(timezone.utc)
-    result: dict[str, Any] = {"guildId": guild, "userId": user, "source": "unavailable",
-                              "username": None, "globalName": None, "nick": None,
-                              "joinedAt": None, "avatarUrl": discord_api.default_avatar_url(user),
-                              "bannerUrl": None, "accentColor": None}
+    member = None
     if cfg.discord_token:
         try:
             member = await discord_api.get_member(cfg, guild, user)
         except discord_api.DiscordError:
             member = None
-        if member is not None:
-            account = member.get("user") or {}
-            guild_hash = member.get("avatar")
-            global_hash = account.get("avatar")
-            for kind, h in (("guild", guild_hash), ("global", global_hash)):
-                if h:
-                    db[queries.COLL_AVATAR_HISTORY].update_one(
-                        {"guildId": guild, "userId": user, "hash": h},
-                        {"$setOnInsert": {"firstSeen": now}, "$set": {"lastSeen": now, "kind": kind}},
-                        upsert=True,
-                    )
-            result = {
-                **result,
-                "source": "discord",
-                "username": account.get("username"),
-                "globalName": account.get("global_name"),
-                "nick": member.get("nick"),
-                "joinedAt": member.get("joined_at"),
-                "avatarUrl": discord_api.avatar_url(
-                    guild, user, guild_hash or global_hash, "guild" if guild_hash else "global"
-                ),
-                "bannerUrl": discord_api.banner_url(user, account.get("banner")),
-                "accentColor": account.get("accent_color"),
-            }
+    # T16 п.3: pymongo здесь синхронный — вся Mongo-работа уходит в thread,
+    # иначе медленный диск/БД блокирует event loop целого процесса (L06).
+    return await asyncio.to_thread(_build_user_card, db, guild, user, member)
+
+
+def _build_user_card(db: Any, guild: str, user: str, member: dict | None) -> dict:
+    now = datetime.now(timezone.utc)
+    result: dict[str, Any] = {"guildId": guild, "userId": user, "source": "unavailable",
+                              "username": None, "globalName": None, "nick": None,
+                              "joinedAt": None, "avatarUrl": discord_api.default_avatar_url(user),
+                              "bannerUrl": None, "accentColor": None}
+    if member is not None:
+        account = member.get("user") or {}
+        guild_hash = member.get("avatar")
+        global_hash = account.get("avatar")
+        for kind, h in (("guild", guild_hash), ("global", global_hash)):
+            if h:
+                db[queries.COLL_AVATAR_HISTORY].update_one(
+                    {"guildId": guild, "userId": user, "hash": h},
+                    {"$setOnInsert": {"firstSeen": now}, "$set": {"lastSeen": now, "kind": kind}},
+                    upsert=True,
+                )
+        result = {
+            **result,
+            "source": "discord",
+            "username": account.get("username"),
+            "globalName": account.get("global_name"),
+            "nick": member.get("nick"),
+            "joinedAt": member.get("joined_at"),
+            "avatarUrl": discord_api.avatar_url(
+                guild, user, guild_hash or global_hash, "guild" if guild_hash else "global"
+            ),
+            "bannerUrl": discord_api.banner_url(user, account.get("banner")),
+            "accentColor": account.get("accent_color"),
+        }
     result["avatars"] = [
         {
             "hash": str(doc.get("hash") or ""),
@@ -248,16 +259,18 @@ async def user_card(request: Request, guildId: str, userId: str) -> dict:
             "firstSeen": queries._iso(doc.get("firstSeen")),
             "lastSeen": queries._iso(doc.get("lastSeen")),
         }
-        for doc in db[queries.COLL_AVATAR_HISTORY].find({"guildId": guild, "userId": user}, sort=[("firstSeen", -1)])
+        for doc in db[queries.COLL_AVATAR_HISTORY].find(
+            {"guildId": guild, "userId": user}, sort=[("firstSeen", -1)], **limits.timeout_kwargs()
+        )
     ]
     return result
 
 
-@router.get("/audit/discord")
+@router.get("/audit/discord", dependencies=[Depends(limits.gate("audit"))])
 def audit_discord(
     request: Request,
     guildId: str,
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=200),
     size: int = Query(50, ge=1, le=100),
     actionType: int = Query(0, ge=0, description="0 = все типы"),
     actor: str = Query(""),
@@ -289,9 +302,10 @@ def audit_discord(
     if bounds:
         where["at"] = bounds
     direction = 1 if sort == "asc" else -1
-    total = int(db[audit_sync.COLL_DISCORD_AUDIT].count_documents(where))
+    budget = limits.timeout_kwargs()
+    total = int(db[audit_sync.COLL_DISCORD_AUDIT].count_documents(where, **limits.command_timeout_kwargs()))
     docs = db[audit_sync.COLL_DISCORD_AUDIT].find(
-        where, sort=[("at", direction)], skip=(page - 1) * size, limit=size
+        where, sort=[("at", direction)], skip=(page - 1) * size, limit=size, **budget
     )
     items = [
         {
@@ -327,7 +341,8 @@ def audit_discord_actions(request: Request, guildId: str) -> dict:
             {"$match": {"guildId": guild}},
             {"$group": {"_id": {"type": "$actionType", "action": "$action"}, "n": {"$sum": 1}}},
             {"$sort": {"n": -1}},
-        ]
+        ],
+        **limits.command_timeout_kwargs(),
     )
     return {
         "guildId": guild,
@@ -350,7 +365,7 @@ def audit_discord_status(request: Request, guildId: str) -> dict:
     return {"guildId": guild, **audit_sync.status_snapshot(_db(request), guild)}
 
 
-@router.post("/audit/discord/sync")
+@router.post("/audit/discord/sync", dependencies=[Depends(limits.gate("audit-sync"))])
 async def audit_discord_sync(request: Request, guildId: str) -> dict:
     """Обновить локальную копию журнала Discord прямо сейчас. Read-only обращение к
     Discord + идемпотентный upsert — журнал операций (operations) не требуется.
@@ -374,7 +389,7 @@ def chat_channels(request: Request, guildId: str) -> dict:
     return {"guildId": guild, "items": queries.chat_channels(_db(request), guild)}
 
 
-@router.get("/chat")
+@router.get("/chat", dependencies=[Depends(limits.gate("chat"))])
 def chat_messages(
     request: Request,
     guildId: str,
@@ -454,7 +469,7 @@ async def guild_picker(request: Request, guildId: str) -> dict:
     return {"guildId": guild, "roles": roles, "voiceChannels": channels, "textChannels": text_channels}
 
 
-@router.get("/names")
+@router.get("/names", dependencies=[Depends(limits.gate("names"))])
 async def guild_names(request: Request, guildId: str) -> dict:
     guild = _snowflake(guildId, "guildId")
     from . import discord_api
@@ -473,19 +488,27 @@ async def guild_names(request: Request, guildId: str) -> dict:
     except discord_api.DiscordError:
         pass  # without a bot token names fall back to ids in the UI
     db = getattr(request.app.state, "db", None)
-    users = queries.known_user_names(db, guild) if db is not None else {}
+    users: dict[str, str] = {}
     user_colors: dict[str, str] = {}
+    role_rows: list[dict[str, Any]] = []
     if db is not None:
         try:
             role_rows = await discord_api.guild_roles_raw(cfg, guild)
         except discord_api.DiscordError:
             role_rows = []
+    # T16 п.3: известные имена/цвета — агрегации по всей гильдии (тяжёлые даже
+    # с кэшем) — синхронный pymongo уходит из event loop в thread.
+    def _db_names() -> tuple[dict[str, str], dict[str, str]]:
+        if db is None:
+            return {}, {}
         role_meta = {
             str(row.get("id")): (int(row.get("color") or 0), int(row.get("position") or 0))
             for row in role_rows
             if row.get("id")
         }
-        user_colors = queries.known_user_colors(db, guild, role_meta)
+        return queries.known_user_names(db, guild), queries.known_user_colors(db, guild, role_meta)
+
+    users, user_colors = await asyncio.to_thread(_db_names)
     return {
         "guildId": guild,
         "guildName": guild_name,

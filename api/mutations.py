@@ -274,8 +274,13 @@ def audit_page(
     if bounds:
         where["at"] = bounds
     direction = 1 if sort == "asc" else -1
-    total = db[COLL_AUDIT].count_documents(where)
-    docs = db[COLL_AUDIT].find(where, sort=[("at", direction)], skip=(page - 1) * size, limit=size)
+    from .limits import command_timeout_kwargs, timeout_kwargs
+
+    budget = timeout_kwargs()
+    total = db[COLL_AUDIT].count_documents(where, **command_timeout_kwargs())
+    docs = db[COLL_AUDIT].find(
+        where, sort=[("at", direction)], skip=(page - 1) * size, limit=size, **budget
+    )
     return {
         "guildId": guild_id,
         "page": page,
@@ -300,11 +305,14 @@ def audit_page(
 
 def audit_actions(db: Any, guild_id: str) -> list[dict[str, Any]]:
     """Distinct значения action с количеством — наполняет фильтр в UI."""
+    from .limits import command_timeout_kwargs
+
     rows = db[COLL_AUDIT].aggregate(
         [
             {"$match": {"guildId": guild_id}},
             {"$group": {"_id": "$action", "n": {"$sum": 1}}},
             {"$sort": {"n": -1}},
-        ]
+        ],
+        **command_timeout_kwargs(),
     )
     return [{"action": str(row["_id"]), "count": int(row.get("n") or 0)} for row in rows if row.get("_id")]

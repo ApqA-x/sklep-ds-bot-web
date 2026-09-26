@@ -4,17 +4,22 @@
 Файл отдаётся только когда доказана связь метадания вложения с авторизованной
 гильдией (запись chat_messages), путь канонический и лежит внутри MEDIA_DIR.
 Знание sha256-пути доступа не даёт (M01): без сессии/прав — 404/401.
+
+T16 (L06): тело отдаётся чанками через StreamingResponse — RAM на соединение
+ограничена 64 KiB вместо всего файла (20 МБ × параллельные загрузки = всплеск),
+а синхронные find_one/чтение диска уходят из event loop в thread.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from starlette.responses import Response
+from starlette.responses import Response, StreamingResponse
 
 from .auth import perms_for, require_guild_read
 
@@ -80,7 +85,9 @@ def _find_attachment(request: Request, guild_id: str, *, attachment_id: str = ""
         flt: dict[str, Any] = {"guildId": guild_id, "attachments.id": attachment_id}
     else:
         flt = {"guildId": guild_id, "attachments.path": rel_path}
-    doc = db["chat_messages"].find_one(flt)
+    from .limits import timeout_kwargs
+
+    doc = db["chat_messages"].find_one(flt, **timeout_kwargs())
     if not doc:
         return None
     for item in doc.get("attachments") or []:
@@ -94,7 +101,23 @@ def _find_attachment(request: Request, guild_id: str, *, attachment_id: str = ""
     return None
 
 
+_CHUNK = 64 * 1024
+
+
+def _stream(fh, head: bytes) -> Iterator[bytes]:
+    try:
+        yield head
+        while True:
+            part = fh.read(_CHUNK)
+            if not part:
+                break
+            yield part
+    finally:
+        fh.close()
+
+
 def _serve(request: Request, guild_id: str, meta: dict[str, Any]) -> Response:
+    """Синхронный — вызывается из asyncio.to_thread (L06: не держит event loop)."""
     rel = str(meta.get("path") or "")
     if not meta.get("stored") or not REL_RE.match(rel):
         # нет метаданных о хранимом файле или путь не канонический — как будто файла нет
@@ -109,27 +132,37 @@ def _serve(request: Request, guild_id: str, meta: dict[str, Any]) -> Response:
     if not os.path.isfile(target):
         raise HTTPException(status_code=404, detail="media not found")
     try:
-        with open(target, "rb") as fh:
-            blob = fh.read(MEDIA_MAX_BYTES + 1)
+        size = os.path.getsize(target)
+    except OSError:
+        raise HTTPException(status_code=404, detail="media not found") from None
+    if size > MEDIA_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="media too large")
+    try:
+        fh = open(target, "rb")
     except OSError as err:
         log.warning("media read failed: %s", type(err).__name__)
         raise HTTPException(status_code=404, detail="media not found") from None
-    if len(blob) > MEDIA_MAX_BYTES:
-        raise HTTPException(status_code=413, detail="media too large")
-    inline = _sniff_inline(blob)
+    try:
+        # sniff требует только магические заголовки — не весь файл
+        head = fh.read(12)
+    except OSError:
+        fh.close()
+        raise HTTPException(status_code=404, detail="media not found") from None
+    inline = _sniff_inline(head)
     headers = {
         "X-Content-Type-Options": "nosniff",
         # приватный ответ не кэшируется публично; после отзыва прав кэш не спасёт (M09)
         "Cache-Control": "private, no-store",
+        "Content-Length": str(size),
     }
     if inline is None:
         # SVG/HTML/неизвестное содержимое не исполняется с origin панели
-        return Response(
-            content=blob,
+        return StreamingResponse(
+            _stream(fh, head),
             media_type="application/octet-stream",
             headers={**headers, "Content-Disposition": _disposition(meta)},
         )
-    return Response(content=blob, media_type=inline, headers=headers)
+    return StreamingResponse(_stream(fh, head), media_type=inline, headers=headers)
 
 
 router = APIRouter(tags=["media"])
@@ -143,10 +176,11 @@ guild_router = APIRouter(
 
 @guild_router.get("/media/attachment/{attachmentId}")
 async def guild_media(request: Request, guildId: str, attachmentId: str) -> Response:
-    meta = _find_attachment(request, guildId, attachment_id=attachmentId)
+    # L06: proof-of-belonging (find по вложенному полю) и чтение файла — вне loop
+    meta = await asyncio.to_thread(_find_attachment, request, guildId, attachment_id=attachmentId)
     if meta is None:
         raise HTTPException(status_code=404, detail="media not found")
-    return _serve(request, guildId, meta)
+    return await asyncio.to_thread(_serve, request, guildId, meta)
 
 
 @router.get("/media/{guildId}/{rest:path}")
@@ -157,7 +191,7 @@ async def legacy_media(request: Request, guildId: str, rest: str) -> Response:
     if not perms & ADMINISTRATOR:
         raise HTTPException(status_code=403, detail="administrator permission required")
     rel = f"{guildId}/{rest}"
-    meta = _find_attachment(request, guildId, rel_path=rel)
+    meta = await asyncio.to_thread(_find_attachment, request, guildId, rel_path=rel)
     if meta is None:
         raise HTTPException(status_code=404, detail="media not found")
-    return _serve(request, guildId, meta)
+    return await asyncio.to_thread(_serve, request, guildId, meta)

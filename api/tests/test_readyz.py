@@ -108,6 +108,30 @@ def test_readyz_media_mount_checked_without_leaking_path(tmp_path) -> None:
     assert client2.get("/api/readyz").status_code == 200
 
 
+def test_readyz_media_quota_low_warns_but_stays_ready(tmp_path) -> None:
+    # L05: нехватка места останавливает НОВЫЕ загрузки (это делает бот), но
+    # чтение уже сохранённого архива не страдает — readiness остаётся 200,
+    # проблема наружу — через warnings, а не через отказ сервиса.
+    present = tmp_path / "media"
+    present.mkdir()
+    client = _client(FakePingableMongo(), media_dir=str(present), media_min_free_bytes=10**18)
+    response = client.get("/api/readyz")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["checks"]["media"]["ok"] is True
+    assert body["checks"]["media"]["quotaLow"] is True
+    assert "media disk quota low" in body["warnings"]
+
+
+def test_readyz_media_quota_ok_no_warning(tmp_path) -> None:
+    present = tmp_path / "media"
+    present.mkdir()
+    client = _client(FakePingableMongo(), media_dir=str(present), media_min_free_bytes=1)
+    body = client.get("/api/readyz").json()
+    assert body["checks"]["media"]["quotaLow"] is False
+    assert "warnings" not in body or not body["warnings"]
+
+
 def test_readyz_schema_missing_blocks() -> None:
     client = _client(FakePingableMongo())
     client.app.state.schema_report = {"ok": False, "missing": ["chat_messages_guild_sent"]}

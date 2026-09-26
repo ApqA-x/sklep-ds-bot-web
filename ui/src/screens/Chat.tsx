@@ -33,8 +33,26 @@ function attachmentUrl(guildId: string, a: ChatAttachment): string {
   return a.url; // запасная ссылка Discord (протухает)
 }
 
+const SKIP_REASON_LABELS: Record<string, string> = {
+  "disk-quota-low": "не сохранено в архив: мало места на диске",
+};
+
 function Attachment({ guildId, a }: { guildId: string; a: ChatAttachment }) {
   const href = attachmentUrl(guildId, a);
+  if (!a.stored && a.storeSkipReason) {
+    // L05: честная причина вместо бесконечной загрузки/молчаливой ссылки.
+    const reason = SKIP_REASON_LABELS[a.storeSkipReason] ?? a.storeSkipReason;
+    return (
+      <span className="chat-attachment">
+        📎 {a.filename} <span className="muted tiny">({fmtBytes(a.size)}) — {reason}</span>{" "}
+        {href ? (
+          <a href={href} target="_blank" rel="noreferrer" className="tiny">
+            Discord
+          </a>
+        ) : null}
+      </span>
+    );
+  }
   if (!href) return null;
   if (a.kind === "image") {
     return (

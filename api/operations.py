@@ -263,13 +263,17 @@ def public_view(doc: dict[str, Any]) -> dict[str, Any]:
 
 def get_operation(db: Any, guild_id: str, op_id: str) -> dict[str, Any] | None:
     """Guild-scope (T04): чужая операция не различима от несуществующей."""
-    doc = db[COLL_OPERATIONS].find_one({"_id": op_id})
+    from .limits import timeout_kwargs
+
+    doc = db[COLL_OPERATIONS].find_one({"_id": op_id}, **timeout_kwargs())
     if doc is None or doc.get("guildId") != guild_id:
         return None
     return doc
 
 
 def list_batch(db: Any, guild_id: str, batch_id: str) -> list[dict[str, Any]]:
-    docs = list(db[COLL_OPERATIONS].find({"guildId": guild_id, "batchId": batch_id}))
+    from .limits import timeout_kwargs
+
+    docs = list(db[COLL_OPERATIONS].find({"guildId": guild_id, "batchId": batch_id}, **timeout_kwargs()))
     docs.sort(key=lambda d: d.get("createdAt") or _now())
     return docs

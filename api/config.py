@@ -46,6 +46,10 @@ class WebConfig:
     web_session_secret: str = ""
     web_public_url: str = ""
     session_max_age_hours: int = 8
+    # D01: closed first release — only these guild ids may be accessed at all.
+    # Empty in development/test means "no restriction"; in production it is a
+    # startup error (see validate_config).
+    guild_allowlist: frozenset[str] = frozenset()
     media_dir: str = ""
     log_level: str = "INFO"
     warnings: list[str] = field(default_factory=list)
@@ -65,6 +69,19 @@ class WebConfig:
     @property
     def auth_enabled(self) -> bool:
         return self.secrets_complete and not self.dev_bypass_auth
+
+    def guild_allowed(self, guild_id: str) -> bool:
+        # empty allowlist (development/test) = no restriction; production is
+        # validated to always carry a non-empty one.
+        return not self.guild_allowlist or guild_id in self.guild_allowlist
+
+
+def _parse_allowlist(raw: str) -> frozenset[str]:
+    ids = {part.strip() for part in raw.replace(",", " ").split() if part.strip()}
+    bad = {item for item in ids if not item.isdigit() or not 5 <= len(item) <= 25}
+    if bad:
+        raise ConfigError("WEB_GUILD_ALLOWLIST must contain Discord guild snowflakes")
+    return frozenset(ids)
 
 
 def validate_config(cfg: WebConfig) -> None:
@@ -99,6 +116,8 @@ def validate_config(cfg: WebConfig) -> None:
         missing.append("DISCORD_TOKEN")
     if not cfg.web_public_url and not cfg.discord_redirect_uri:
         missing.append("WEB_PUBLIC_URL (or DISCORD_REDIRECT_URI)")
+    if not cfg.guild_allowlist:
+        missing.append("WEB_GUILD_ALLOWLIST")
     if missing:
         raise ConfigError("WEB_ENV=production requires: " + ", ".join(missing))
 
@@ -154,6 +173,7 @@ def load_config(env: Any = None, *, validate: bool = True) -> WebConfig:
         discord_redirect_uri=_get(source, "DISCORD_REDIRECT_URI"),
         web_session_secret=_get(source, "WEB_SESSION_SECRET"),
         web_public_url=_get(source, "WEB_PUBLIC_URL"),
+        guild_allowlist=_parse_allowlist(_get(source, "WEB_GUILD_ALLOWLIST")),
         media_dir=_get(source, "MEDIA_DIR"),
         log_level=_get(source, "LOG_LEVEL", "INFO").upper(),
     )

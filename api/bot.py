@@ -95,6 +95,90 @@ async def _call(
     return await discord_api.bot_request(cfg, method, path, json_body=json_body, reason=reason, files=files)
 
 
+async def _meta_get(request: Request, path: str):
+    """GET метаданных ресурса для проверки принадлежности гильдии (T04).
+
+    Без бот-токена проверка невозможна: в dev-режиме пропускаем (изменяющие
+    вызовы всё равно закроются 503 в _call), в production токен обязателен (C01).
+    """
+    cfg = _cfg(request)
+    if not cfg.discord_token:
+        return None
+    status, payload = await discord_api.bot_request(cfg, "GET", path)
+    return status, payload
+
+
+async def _check_member(request: Request, guild_id: str, user_id: str) -> None:
+    """Target must be a member of the authorized guild BEFORE any mutation."""
+    got = await _meta_get(request, f"/guilds/{guild_id}/members/{user_id}")
+    if got is None:
+        return
+    status, payload = got
+    if status == 404:
+        raise HTTPException(status_code=403, detail="member not found in this guild")
+    if status >= 400:
+        raise HTTPException(status_code=502, detail=f"member lookup failed: {status}")
+
+
+async def _check_channel(
+    request: Request, guild_id: str, channel_id: str, *, types: tuple[int, ...] | None = None
+) -> dict[str, Any]:
+    """Channel must belong to the authorized guild; optional channel-type policy.
+    Threads carry their guild_id, so the same check covers them."""
+    got = await _meta_get(request, f"/channels/{channel_id}")
+    if got is None:
+        return {}
+    status, payload = got
+    if status == 404:
+        raise HTTPException(status_code=404, detail="channel not found")
+    if status >= 400 or not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail=f"channel lookup failed: {status}")
+    if str(payload.get("guild_id") or "") != guild_id:
+        raise HTTPException(status_code=403, detail="channel belongs to another guild")
+    if types is not None and int(payload.get("type") or 0) not in types:
+        raise HTTPException(status_code=422, detail="wrong channel type for this action")
+    return payload
+
+
+async def _check_role(request: Request, guild_id: str, role_id: str) -> None:
+    """Role must belong to the authorized guild; @everyone and managed roles are
+    refused explicitly (not left to the UI picker)."""
+    _snowflake(role_id, "roleId")
+    if role_id == guild_id:
+        raise HTTPException(status_code=422, detail="cannot manage @everyone role")
+    got = await _meta_get(request, f"/guilds/{guild_id}/roles")
+    if got is None:
+        return
+    status, rows = got
+    if status >= 400 or not isinstance(rows, list):
+        raise HTTPException(status_code=502, detail=f"role lookup failed: {status}")
+    for row in rows:
+        if str(row.get("id") or "") != role_id:
+            continue
+        if row.get("managed") or row.get("tags"):
+            raise HTTPException(status_code=422, detail="managed roles are not assignable here")
+        return
+    raise HTTPException(status_code=403, detail="role belongs to another guild")
+
+
+async def _check_invite(request: Request, guild_id: str, code: str) -> None:
+    """Invite guild_id must match; unknown ownership → deny (T04.2)."""
+    got = await _meta_get(request, f"/invites/{code}")
+    if got is None:
+        return
+    status, payload = got
+    if status == 404:
+        raise HTTPException(status_code=404, detail="invite not found")
+    if status >= 400 or not isinstance(payload, dict):
+        raise HTTPException(status_code=502, detail=f"invite lookup failed: {status}")
+    if str(payload.get("guild_id") or "") != guild_id:
+        raise HTTPException(status_code=403, detail="invite belongs to another guild")
+
+
+TEXTISH_CHANNEL_TYPES = (0, 5, 10, 11, 12)  # text/announcement + треды
+VOICE_TARGET_TYPES = (2, 13)  # voice + stage
+
+
 def _finish(request: Request, action: str, arguments: dict[str, Any], status: int, payload: Any) -> dict:
     db = request.app.state.db
     if db is None:
@@ -120,6 +204,8 @@ def _finish(request: Request, action: str, arguments: dict[str, Any], status: in
 async def member_role(request: Request, guildId: str, userId: str, body: MemberRoleAction) -> dict:
     _snowflake(guildId, "guildId")
     _snowflake(userId, "userId")
+    await _check_member(request, guildId, userId)
+    await _check_role(request, guildId, body.roleId)
     method = "PUT" if body.action == "grant" else "DELETE"
     status, payload = await _call(request, method, f"/guilds/{guildId}/members/{userId}/roles/{body.roleId}")
     return _finish(request, "role", {"userId": userId, "roleId": body.roleId, "action": body.action}, status, payload)
@@ -129,6 +215,7 @@ async def member_role(request: Request, guildId: str, userId: str, body: MemberR
 async def member_timeout(request: Request, guildId: str, userId: str, body: TimeoutMemberAction) -> dict:
     _snowflake(guildId, "guildId")
     _snowflake(userId, "userId")
+    await _check_member(request, guildId, userId)
     if body.mute:
         until = (datetime.now(timezone.utc) + timedelta(seconds=body.seconds)).isoformat()
         json_body: dict[str, Any] | None = {"communication_disabled_until": until}
@@ -144,6 +231,8 @@ async def member_timeout(request: Request, guildId: str, userId: str, body: Time
 async def member_move(request: Request, guildId: str, userId: str, body: MoveMemberAction) -> dict:
     _snowflake(guildId, "guildId")
     _snowflake(userId, "userId")
+    await _check_member(request, guildId, userId)
+    await _check_channel(request, guildId, body.channelId, types=VOICE_TARGET_TYPES)
     status, payload = await _call(
         request,
         "PATCH",
@@ -157,6 +246,7 @@ async def member_move(request: Request, guildId: str, userId: str, body: MoveMem
 async def member_disconnect(request: Request, guildId: str, userId: str) -> dict:
     _snowflake(guildId, "guildId")
     _snowflake(userId, "userId")
+    await _check_member(request, guildId, userId)
     status, payload = await _call(
         request,
         "PATCH",
@@ -170,6 +260,7 @@ async def member_disconnect(request: Request, guildId: str, userId: str) -> dict
 async def member_kick(request: Request, guildId: str, userId: str, body: KickMemberAction) -> dict:
     _snowflake(guildId, "guildId")
     _snowflake(userId, "userId")
+    await _check_member(request, guildId, userId)
     perms = await perms_for(request, guildId)
     if not perms & (1 << 3 | KICK_MEMBERS):
         raise HTTPException(status_code=403, detail="kick requires administrator or kick members")
@@ -183,6 +274,7 @@ async def member_kick(request: Request, guildId: str, userId: str, body: KickMem
 async def channel_message(request: Request, guildId: str, channelId: str) -> dict:
     _snowflake(guildId, "guildId")
     _snowflake(channelId, "channelId")
+    await _check_channel(request, guildId, channelId, types=TEXTISH_CHANNEL_TYPES)
     content, embed, files = await _message_body(request)
     json_body: dict[str, Any] = {}
     if content:
@@ -255,6 +347,8 @@ async def _message_body(request: Request) -> tuple[str, EmbedSpec | None, list[t
 @router.post("/invite")
 async def create_invite(request: Request, guildId: str, body: InviteCreateAction) -> dict:
     _snowflake(guildId, "guildId")
+    _snowflake(body.channelId, "channelId")
+    await _check_channel(request, guildId, body.channelId)
     status, payload = await _call(
         request,
         "POST",
@@ -269,5 +363,6 @@ async def delete_invite(request: Request, guildId: str, code: str) -> dict:
     _snowflake(guildId, "guildId")
     if not INVITE_CODE_RE.match(code):
         raise HTTPException(status_code=422, detail="invalid invite code")
+    await _check_invite(request, guildId, code)
     status, payload = await _call(request, "DELETE", f"/invites/{code}")
     return _finish(request, "invite.delete", {"code": code}, status, payload)

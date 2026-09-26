@@ -44,12 +44,14 @@ def test_env_parsing_and_bad_port_falls_back() -> None:
             "DISCORD_CLIENT_SECRET": "secret",
             "WEB_SESSION_SECRET": "s" * 32,
             "WEB_PUBLIC_URL": "https://example.invalid",
+            "WEB_GUILD_ALLOWLIST": "170000000000000000, 170000000000000001",
         }
     )
     assert cfg.web_port == 8000
     assert cfg.discord_client_id == "cid"
     assert cfg.web_public_url == "https://example.invalid"
     assert cfg.auth_enabled is True
+    assert cfg.guild_allowlist == frozenset({"170000000000000000", "170000000000000001"})
 
 
 def test_blank_mongo_uri_falls_back_to_default() -> None:

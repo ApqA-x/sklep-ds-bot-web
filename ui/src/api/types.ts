@@ -253,6 +253,21 @@ export type DiscordAuditPage = {
   items: DiscordAuditEntry[];
 };
 
+// T11: честная сводка синхронизации копии журнала Discord (GET /audit/discord/status)
+export type DiscordAuditSyncStatus = {
+  guildId: string;
+  backfillComplete: boolean;
+  freshCursor: string;
+  backfillCursor: string;
+  accessDenied: boolean;
+  lastSuccessAt: string | null;
+  lastError: { status: number; at: string | null } | null;
+  storedEntries: number;
+  secondsSinceSuccess: number | null;
+  syncStale: boolean;
+  syncIntervalS: number;
+};
+
 export type NamesPayload = {
   guildId: string;
   guildName: string | null;
@@ -355,7 +370,10 @@ export type ChatMessagesPage = {
   items: ChatMessage[];
   hasMore: boolean;
   sort: string;
+  nextCursor: string | null; // T11: keyset (sentAt,messageId,направление,фильтр)
+  /** @deprecated легаси timestamp-границы; новый цикл использует nextCursor */
   nextBefore: string | null;
+  /** @deprecated см. nextBefore */
   nextAfter: string | null;
 };
 

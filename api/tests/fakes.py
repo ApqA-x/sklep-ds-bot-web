@@ -145,6 +145,19 @@ class FakeCollection:
             return doc
         return None
 
+    def find_one_and_update(self, flt: dict, update: dict, *, sort: Any = None,
+                            return_document: Any = None, **kw):
+        # CAS-семиантика lease: первый совпавший документ, BEFORE/AFTER по return_document
+        self.calls.append(("find_one_and_update", self.name, flt, update))
+        matches = _sorted([d for d in self.docs if _matches(d, flt)], sort)
+        if not matches:
+            return None
+        doc = matches[0]
+        before = dict(doc)
+        self._apply_update(doc, update, inserted=False)
+        after = return_document is True or getattr(return_document, "value", 0) == 2
+        return dict(doc) if after else before
+
     def count_documents(self, flt: dict | None = None, **kw):
         self.calls.append(("count_documents", self.name, flt))
         return sum(1 for doc in self.docs if _matches(doc, flt))

@@ -5,6 +5,7 @@ import { Button } from "primereact/button";
 import { Dropdown } from "primereact/dropdown";
 import { SelectButton } from "primereact/selectbutton";
 import { api } from "../api/client";
+import type { DiscordAuditSyncStatus } from "../api/types";
 import { DiscordAuditFull } from "../components/auditDiscordText";
 import { UserLink } from "../components/userLink";
 import { TargetUserPicker } from "../components/userSearch";
@@ -14,6 +15,52 @@ import { fmtDate } from "../lib/format";
 import { DName } from "../names";
 
 const DSort = ["desc", "asc"] as const;
+
+// T11/H09: честное состояние копии журнала. «Данные загружены» — только при
+// backfillComplete (пустая страница от Discord доказала низ истории); при 403 —
+// «нет доступа»; при свежих ошибках/задержке — предупреждение; недостижимую
+// Discord-историю не обещаем.
+function AuditSyncBanner({ s }: { s: DiscordAuditSyncStatus }) {
+  const lastOk = s.lastSuccessAt ? `последний успех ${fmtDate(s.lastSuccessAt)}` : "успешных прогонов ещё не было";
+  return (
+    <div className="audit-sync-banner">
+      {s.accessDenied ? (
+        <div className="hint danger">
+          ⚠ У бота нет доступа к журналу аудита (403) — локальная копия не обновляется.
+          Выдайте роли бота разрешение «Просматривать журнал аудита».
+        </div>
+      ) : (
+        <>
+          {s.lastError && (
+            <div className="hint danger">
+              ⚠ Ошибка Discord {s.lastError.status}
+              {s.lastError.at ? ` (${fmtDate(s.lastError.at)})` : ""} — повтор не раньше следующего
+              тика (~{Math.max(1, Math.round(s.syncIntervalS / 60))} мин), плотных ретраев нет.
+            </div>
+          )}
+          {!s.backfillComplete && (
+            <div className="hint">
+              ⏳ Загрузка истории продолжается: сохранено {s.storedEntries} записей — архив ещё не
+              полон, дозагрузка идёт автоматически с сохранённой точки.
+            </div>
+          )}
+          {s.backfillComplete && s.syncStale && (
+            <div className="hint danger">
+              ⚠ Синхронизация отстаёт ({lastOk}).
+            </div>
+          )}
+          {s.backfillComplete && !s.syncStale && (
+            <div className="hint">✓ Данные загружены ({lastOk}).</div>
+          )}
+        </>
+      )}
+      <div className="muted tiny">
+        Доступная Discord-история ограничена политикой Discord (~45 дней / до 100 000 записей) —
+        более старые события восстановить невозможно ни при каких курсорах.
+      </div>
+    </div>
+  );
+}
 
 // Копия журнала аудита Discord (discord_audit_logs) с фильтрами, пагинацией и
 // человекочитаемым отображением. Отличается от «сайта»: источник — сам Discord.
@@ -63,14 +110,24 @@ export function AuditDiscord({ guildId, toolbarExtra }: { guildId: string; toolb
     staleTime: 60_000,
   });
 
+  const status = useQuery({
+    queryKey: ["audit-discord-status", guildId],
+    queryFn: () => api.auditDiscordStatus(guildId),
+    refetchInterval: 30_000,
+  });
+
   const refresh = async () => {
     setSyncing(true);
     setSyncMsg("");
     try {
       const res = await api.auditDiscordSync(guildId);
-      setSyncMsg(res.error ? `⚠ ${res.error}` : `записей добавлено: ${res.inserted}`);
+      if (res.error) setSyncMsg(`⚠ ${res.error}`);
+      else if (res.skipped) setSyncMsg("синхронизация уже выполняется — повторится на следующем тике");
+      else if (!res.ok) setSyncMsg(`⚠ Discord вернул ${res.discordStatus}`);
+      else setSyncMsg(`записей добавлено: ${res.inserted}${res.backfillComplete ? "" : " (история дозагружается)"}`);
       qc.invalidateQueries({ queryKey: ["audit-discord", guildId] });
       qc.invalidateQueries({ queryKey: ["audit-discord-actions", guildId] });
+      qc.invalidateQueries({ queryKey: ["audit-discord-status", guildId] });
     } catch (err) {
       setSyncMsg(`⚠ ${err instanceof Error ? err.message : "ошибка синхронизации"}`);
     } finally {
@@ -119,6 +176,7 @@ export function AuditDiscord({ guildId, toolbarExtra }: { guildId: string; toolb
         </span>
         <Button icon="pi pi-arrow-right" disabled={page >= pages} onClick={() => setPage((p) => p + 1)} />
       </div>
+      {status.data && <AuditSyncBanner s={status.data} />}
       {showFilters && (
         <div className="filters-panel">
           <div className="filter-block">

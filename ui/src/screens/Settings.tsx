@@ -6,12 +6,27 @@ import { Checkbox } from "primereact/checkbox";
 import { ColorPicker } from "primereact/colorpicker";
 import { Dropdown } from "primereact/dropdown";
 import { InputText } from "primereact/inputtext";
-import { api, useCanWrite } from "../api/client";
-import type { VoiceChannelOption } from "../api/types";
+import { ApiError, api, useCanWrite } from "../api/client";
+import type { GuildSettingsDoc, VoiceChannelOption } from "../api/types";
 import { ErrorBox, Loading, Section } from "../components/ui";
 import { TargetUserPicker } from "../components/userSearch";
 import { DName, type NameKind } from "../names";
 import { usePicker } from "../names";
+import {
+  EDITABLE_KEYS,
+  FIELD_LABELS,
+  applySaved,
+  dirtyFields,
+  discardField,
+  emptyDraft,
+  loadDraft,
+  mergeServer,
+  onConflict,
+  saveDraft,
+  setField,
+  type Draft,
+  type EditableKey,
+} from "./settingsDraft";
 
 // [ключ в activityEventTypes, название, подсказка что бот публикует]
 const ACTIVITY_EVENT_TYPES: [string, string, string][] = [
@@ -55,22 +70,6 @@ const BOT_COMMANDS: [string, string, "all" | "admin"][] = [
   ["disconnect", "отключить бота от канала", "admin"],
   ["status", "состояние бота", "admin"],
 ];
-
-const EDITABLE_KEYS = [
-  "trackingMode",
-  "trackedChannelIds",
-  "summaryChannelId",
-  "fallbackSummaryChannelId",
-  "autoRoleId",
-  "soundboardEnforcementEnabled",
-  "autoRestoreRoles",
-  "autoRestoreNicknames",
-  "activityChannelId",
-  "activityCategoryChannelIds",
-  "activityEventTypes",
-  "activityEventColors",
-  "commandAccess",
-] as const;
 
 function asStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map(String) : [];
@@ -175,11 +174,6 @@ function ChannelSelect({
       {!known && <NameHint kind="channel" value={current} />}
     </label>
   );
-}
-
-function normalize(value: unknown): unknown {
-  if (value === undefined || value === null) return "";
-  return value;
 }
 
 function IdList({
@@ -295,36 +289,46 @@ export default function Settings() {
   const query = useQuery({ queryKey: ["settings", guildId], queryFn: () => api.settings(guildId) });
   const picker = usePicker(guildId);
 
-  const [form, setForm] = useState<Record<string, unknown>>({});
+  // T07: serverSnapshot + draft + dirtyFields + baseRevision вместо единого form-state
+  const [draft, setDraft] = useState<Draft | null>(() => loadDraft(guildId) ?? null);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    if (query.data) setForm({ ...query.data });
-  }, [query.data]);
+    const server = query.data;
+    if (!server) return;
+    // принятый background response обновляет snapshot/baseRevision, но не переписывает dirty draft
+    setDraft((d) => mergeServer(d ?? loadDraft(guildId) ?? emptyDraft(server), server));
+  }, [guildId, query.data]);
 
-  const changed = useMemo(() => {
-    const doc = query.data;
-    if (!doc) return {} as Record<string, unknown>;
-    const fields: Record<string, unknown> = {};
-    for (const key of EDITABLE_KEYS) {
-      if (JSON.stringify(normalize(form[key])) !== JSON.stringify(normalize(doc[key]))) {
-        fields[key] = normalize(form[key]);
-      }
-    }
-    return fields;
-  }, [form, query.data]);
+  useEffect(() => {
+    if (draft) saveDraft(guildId, draft);
+  }, [draft, guildId]);
+
+  const dirty = useMemo(() => (draft ? dirtyFields(draft) : {}), [draft]);
 
   const patch = useMutation({
-    mutationFn: (fields: Record<string, unknown>) =>
-      api.patchSettings(guildId, {
-        ...fields,
-        expectedRevision: Number((query.data?.revision as number | undefined) ?? 0),
-      }),
-    onSuccess: () => {
+    mutationFn: (body: { fields: Record<string, unknown>; revision: number }) =>
+      api.patchSettings(guildId, { ...body.fields, expectedRevision: body.revision }),
+    onSuccess: (doc: GuildSettingsDoc) => {
       setNotice("сохранено");
+      // baseline обновляется ответом сервера; поля, изменённые во время запроса, остаются черновиком
+      setDraft((d) => (d ? applySaved(d, doc) : d));
       queryClient.invalidateQueries({ queryKey: ["settings", guildId] });
     },
-    onError: (err: Error) => setNotice(err.message),
+    onError: (err: Error) => {
+      if (err instanceof ApiError && err.status === 409) {
+        const detail = err.detail as { error?: string; current?: GuildSettingsDoc } | undefined;
+        if (detail?.error === "revision_conflict" && detail.current) {
+          // T07.3: без автоматического повтора старых значений — обновляем baseline,
+          // подсвечиваем конфликтные поля, решение (применить/принять сервер) принимает пользователь
+          setDraft((d) => (d ? onConflict(d, detail.current as GuildSettingsDoc) : d));
+          setNotice("настройки изменились на сервере — сравните значения и сохраните нужные поля");
+          return;
+        }
+      }
+      // 429/503/422/сеть: черновик остаётся нетронутым (T07.4)
+      setNotice(err.message);
+    },
   });
 
   const listAction = useMutation({
@@ -337,7 +341,11 @@ export default function Settings() {
       userId: string;
       action: "add" | "remove";
     }) => (field === "trusted" ? api.trusted(guildId, userId, action) : api.autoUnmute(guildId, userId, action)),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["settings", guildId] }),
+    onSuccess: (doc: GuildSettingsDoc) => {
+      // серверный $addToSet/$pull: snapshot обновляется сразу, dirty draft сохраняется (U01)
+      setDraft((d) => mergeServer(d ?? emptyDraft(doc), doc));
+      queryClient.invalidateQueries({ queryKey: ["settings", guildId] });
+    },
     onError: (err: Error) => setNotice(err.message),
   });
 
@@ -361,7 +369,14 @@ export default function Settings() {
   if (query.isError) return <ErrorBox error={query.error} />;
   if (!query.data) return null;
 
-  const set = (key: string, value: unknown) => setForm((f) => ({ ...f, [key]: value }));
+  // T07: серверный документ + несохранённые правки поверх него
+  const server = query.data;
+  const form: Record<string, unknown> = { ...server, ...dirty };
+  const set = (key: string, value: unknown) =>
+    setDraft((d) => setField(d ?? emptyDraft(server), key as EditableKey, value, server));
+  // конфликты: поле изменено на сервере, пока у нас черновик (U02/409 или фоновый refetch);
+  // mergeServer/onConflict оставляют только записи, где значение пользователя != серверное
+  const conflictKeys = draft ? EDITABLE_KEYS.filter((key) => draft.fields[key]?.changed) : [];
   const trustedIds = asStringArray(form.trustedUserIds);
   const unmuteIds = asStringArray(form.autoUnmuteUserIds);
   const trackedChannels = asStringArray(form.trackedChannelIds);
@@ -734,11 +749,38 @@ export default function Settings() {
           </form>
         </Section>
       )}
+      {canWrite && conflictKeys.length > 0 && (
+        <Section title="Конфликт изменений">
+          <p className="muted tiny">
+            Эти поля изменились на сервере после вашего редактирования. «Сохранить изменения» применит{" "}
+            <em>ваши</em> значения поверх свежей версии; «принять серверное» отменит вашу правку.
+          </p>
+          {conflictKeys.map((key) => {
+            const entry = draft?.fields[key];
+            if (!entry) return null;
+            return (
+              <div className="toolbar" key={key}>
+                <strong>{FIELD_LABELS[key]}</strong>
+                <span className="muted tiny">
+                  сервер: {JSON.stringify(entry.base ?? null)} · ваш: {JSON.stringify(entry.value ?? null)}
+                </span>
+                <Button text onClick={() => setDraft((d) => (d ? discardField(d, key) : d))}>
+                  принять серверное
+                </Button>
+              </div>
+            );
+          })}
+        </Section>
+      )}
       {canWrite && (
         <div className="toolbar">
           <Button
-            disabled={Object.keys(changed).length === 0 || patch.isPending}
-            onClick={() => patch.mutate(changed)}
+            disabled={Object.keys(dirty).length === 0 || patch.isPending || !draft}
+            onClick={() => {
+              // защита от двойного submit (U04): повторный клик пока запрос в полёте игнорируется
+              if (patch.isPending || !draft) return;
+              patch.mutate({ fields: { ...dirty }, revision: draft.baseRevision });
+            }}
           >
             {patch.isPending ? "сохранение…" : "Сохранить изменения"}
           </Button>

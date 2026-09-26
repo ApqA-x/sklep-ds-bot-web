@@ -5,6 +5,7 @@ import { ConfirmDialog } from "primereact/confirmdialog";
 import { api } from "./api/client";
 import { nameOf, useNames } from "./names";
 import { useGuild } from "./guild";
+import { clearDrafts } from "./screens/settingsDraft";
 
 export default function Layout() {
   const { guildId } = useParams<{ guildId: string }>();
@@ -53,6 +54,7 @@ export default function Layout() {
               label="выход"
               onClick={async () => {
                 await api.logout();
+                clearDrafts(); // U05: черновики настроек не переживают выход/смену пользователя
                 queryClient.clear();
                 navigate("/");
               }}

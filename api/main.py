@@ -10,8 +10,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from starlette.responses import Response
 
 from . import read as read_api
+from . import readiness
 from .config import ConfigError, WebConfig, load_config
 from .queries import ensure_web_indexes
+from .supervise import LoopMonitor, Supervisor
 
 API_DIR = Path(__file__).resolve().parent
 UI_DIST = (API_DIR.parent / "ui" / "dist").resolve()
@@ -24,14 +26,7 @@ def _clean(value: str | None) -> str:
 
 
 def _mongo_ping(app: FastAPI) -> dict[str, object]:
-    mongo = getattr(app.state, "mongo", None)
-    if mongo is None:
-        return {"ok": False, "error": "not configured"}
-    try:
-        mongo.admin.command("ping")
-        return {"ok": True}
-    except Exception as exc:  # serverSelectionTimeoutMS bounds the wait
-        return {"ok": False, "error": type(exc).__name__}
+    return readiness.mongo_ping(getattr(app.state, "mongo", None))
 
 
 def _static_file(full_path: str) -> Path | None:
@@ -71,6 +66,10 @@ def create_app(
     elif not cfg.auth_enabled and not cfg.is_production:
         log.warning("auth gate disabled: OAuth/session config incomplete (mode=%s)", cfg.app_env)
 
+    # T12: создаём до lifespan — /api/readyz должен уметь отвечать и вне его
+    supervisor = Supervisor()
+    loop_monitor = LoopMonitor()
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         database = getattr(app.state, "db", None)
@@ -83,6 +82,7 @@ def create_app(
             from .schema_contract import verify_web_schema
 
             schema_report = verify_web_schema(database)
+            app.state.schema_report = schema_report
             if schema_report.get("acceptedAlias"):
                 log.info("schema: эквивалентные индексы под другими именами: %s",
                          schema_report["acceptedAlias"])
@@ -98,16 +98,48 @@ def create_app(
                     log.info("guild_settings revision backfill: %s docs", migrated)
             except Exception:
                 log.warning("guild_settings revision backfill failed", exc_info=True)
-        sync_task: asyncio.Task | None = None
-        if database is not None and cfg.discord_token:
-            from . import audit_sync
 
-            sync_task = asyncio.create_task(audit_sync.run_loop(app))
+        # T12: фоновые циклы под надзором — исключение наблюдаемо, respawn с
+        # backoff+jitter, повторяющийся критичный отказ снимает readiness.
+        supervisor.spawn("web-loop-monitor", loop_monitor.run)
+        if database is not None:
+            async def schema_recheck() -> None:
+                from .schema_contract import verify_web_schema as _verify
+
+                while True:
+                    await asyncio.sleep(readiness.SCHEMA_RECHECK_INTERVAL_S)
+                    try:
+                        app.state.schema_report = await asyncio.to_thread(_verify, database)
+                        supervisor.beat("web-schema-recheck")
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        log.warning("schema recheck failed", exc_info=True)
+
+            supervisor.spawn("web-schema-recheck", schema_recheck)
+            if cfg.discord_token:
+                from . import audit_sync
+
+                supervisor.spawn(
+                    "discord-audit-sync",
+                    lambda: audit_sync.run_loop(app, on_cycle=lambda: supervisor.beat("discord-audit-sync")),
+                    critical=True,
+                )
+            supervisor.spawn(
+                "web-diagnostics",
+                lambda: readiness.diagnostics_loop(app),
+            )
         try:
             yield
         finally:
-            if sync_task is not None:
-                sync_task.cancel()
+            # R05: drain — cancel+await всех надзираемых задач, затем закрываем Mongo.
+            await supervisor.shutdown()
+            close = getattr(getattr(app.state, "mongo", None), "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception:
+                    log.warning("mongo client close failed", exc_info=True)
 
     app = FastAPI(
         title="sklep-ds-bot-web",
@@ -117,6 +149,9 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.config = cfg
+    app.state.supervisor = supervisor
+    app.state.loop_monitor = loop_monitor
+    app.state.schema_report = None
 
     if db is None and mongo_client is None and cfg.mongo_uri:
         try:
@@ -149,16 +184,29 @@ def create_app(
 
     @app.get("/api/healthz")
     def healthz(request: Request) -> JSONResponse:
+        # T12: liveness — «процесс жив и обслуживает запросы». Mongo-статус
+        # остаётся в payload для совместимости, но на код ответа не влияет:
+        # отвал зависимости не должен выглядеть как смерть процесса (R01).
         mongo = _mongo_ping(request.app)
         payload = {
-            "status": "ok" if mongo["ok"] else "degraded",
+            "status": "ok",
+            "role": "liveness",
             "service": "web",
             "version": VERSION,
             "env": cfg.app_env,
             "mongo": mongo,
+            "loop": loop_monitor.snapshot(),
             "auth_enabled": cfg.auth_enabled,
         }
         return JSONResponse(payload, status_code=200)
+
+    @app.get("/api/readyz")
+    def readyz(request: Request) -> JSONResponse:
+        # T12: readiness — «готов выполнять работу»: bounded Mongo ping, схема,
+        # media mount, живые критичные фоновые циклы. 503 = не готов (R01/R02).
+        ready, payload = readiness.evaluate(request.app)
+        payload.update({"service": "web", "version": VERSION, "env": cfg.app_env})
+        return JSONResponse(payload, status_code=200 if ready else 503)
 
     from . import auth as auth_api
     from . import bot as bot_api

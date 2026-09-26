@@ -357,8 +357,12 @@ def known_guilds(db: Any) -> list[str]:
     return guilds
 
 
-async def run_loop(app: Any) -> None:
-    """Фоновая задача lifespan: раз в SYNC_INTERVAL_S скоординированно обновляем журнал."""
+async def run_loop(app: Any, on_cycle: Any = None) -> None:
+    """Фоновая задача lifespan: раз в SYNC_INTERVAL_S скоординированно обновляем журнал.
+
+    T12: on_cycle() вызывается после каждого завершённого цикла — supervisor
+    помечает прогресс (beat), поэтому «цикл крутится» отличим от «цикл умер».
+    """
     while True:
         await asyncio.sleep(SYNC_INTERVAL_S)
         try:
@@ -372,3 +376,5 @@ async def run_loop(app: Any) -> None:
             raise
         except Exception:
             log.warning("discord audit sync loop failed", exc_info=True)
+        if on_cycle is not None:
+            on_cycle()

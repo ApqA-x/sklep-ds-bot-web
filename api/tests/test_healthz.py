@@ -46,12 +46,15 @@ def test_healthz_ok_when_mongo_up() -> None:
     assert body["auth_enabled"] is False
 
 
-def test_healthz_degraded_when_mongo_down() -> None:
+def test_healthz_is_liveness_and_ignores_mongo_outage() -> None:
+    # T12: healthz = liveness. Отвал Mongo больше не меняет ни код, ни status:
+    # деградацию зависимостей выражает /api/readyz (503).
     client = _client(FailingMongo())
     response = client.get("/api/healthz")
     assert response.status_code == 200
     body = response.json()
-    assert body["status"] == "degraded"
+    assert body["status"] == "ok"
+    assert body["role"] == "liveness"
     assert body["mongo"]["ok"] is False
 
 

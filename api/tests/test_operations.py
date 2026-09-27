@@ -542,6 +542,43 @@ def test_r26_invite_result_keeps_code_and_replays_identically(monkeypatch) -> No
     assert calls == []  # второй invite не создавался
 
 
+def test_r26_05_invite_delete_replay_skips_scope_preflight(monkeypatch) -> None:
+    """R26-05.3: повтор уже успешного DELETE /invite/{code} тем же ключом — 200
+    replayed без единого внешнего вызова. Scope-preflight (GET /invites/code)
+    выполняется только для не-терминальных документов: «invite больше нет» в Discord
+    не должен превращать достоверный прошлый успех в 404."""
+    invite_gone = {"value": False}
+    calls: list[dict] = []  # фейк пишет ВСЕ вызовы, включая GET — доказываем ноль обращения
+
+    async def fake_request(cfg, method, path, *, json_body=None, reason=None, files=None):
+        calls.append({"method": method, "path": path})
+        if method == "GET" and path.startswith("/invites/"):
+            if invite_gone["value"]:
+                return 404, {"message": "Unknown Invite"}
+            return 200, {"code": path.rsplit("/", 1)[1], "guild": {"id": GUILD, "name": "G"}}
+        if method == "GET":
+            return 200, _meta_payload(path)
+        return 200, {"id": "ok"}
+
+    monkeypatch.setattr(discord_api, "bot_request", fake_request)
+    bot_module._reset_rate_buckets()
+    auth_module._clear_recheck_cache()
+    client = _client()
+    url = f"/api/guild/{GUILD}/bot/invite/zzz789"
+    headers = {"Idempotency-Key": "k-r26-05del"}
+
+    first = client.delete(url, headers=headers)
+    assert first.status_code == 200 and first.json()["state"] == "succeeded"
+
+    invite_gone["value"] = True
+    calls.clear()
+    replay = client.delete(url, headers=headers)
+    assert replay.status_code == 200, replay.text
+    body = replay.json()
+    assert body["replayed"] is True and body["state"] == "succeeded"
+    assert calls == []  # ни GET preflight, ни DELETE
+
+
 def test_r26_status_read_reconciles_expired_lease(monkeypatch) -> None:
     """GET статуса наблюдает зависший executing с истёкшим lease как unknown и не
     трогает Discord (bounded recovery без внешних эффектов, R26-03.5)."""

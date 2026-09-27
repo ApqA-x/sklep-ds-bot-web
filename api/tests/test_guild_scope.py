@@ -41,7 +41,11 @@ GUILD_ROLES = {
     A: [{"id": A, "name": "@everyone"}, {"id": A_ROLE}, {"id": A_MANAGED_ROLE, "managed": True}],
     B: [{"id": B, "name": "@everyone"}, {"id": B_ROLE}],
 }
-INVITES = {"codeA": {"code": "codeA", "guild_id": A}, "codeB": {"code": "codeB", "guild_id": B}}
+# R26-05: официальный Invite object — принадлежность гильдии во вложенном "guild".
+INVITES = {
+    "codeA": {"code": "codeA", "guild": {"id": A, "name": "A"}},
+    "codeB": {"code": "codeB", "guild": {"id": B, "name": "B"}},
+}
 
 
 @pytest.fixture()
@@ -138,6 +142,16 @@ def test_g03_foreign_invite_delete_denied(scope: dict) -> None:
     assert response.status_code == 403
     assert _mutations(scope["calls"]) == []
     assert scope["db"][mutations.COLL_AUDIT].docs == []
+
+
+# R26-05 (ред-грин пробы valid_discord_invite_rejected): удаление СВОЕГО invite по
+# официальному payload с вложенным guild — 200, ровно одна мутация, ok-запись в аудите.
+def test_g03b_own_invite_delete_accepted(scope: dict) -> None:
+    response = scope["client"].delete(f"/api/guild/{A}/bot/invite/codeA")
+    assert response.status_code == 200
+    assert _mutations(scope["calls"]) == ["DELETE /invites/codeA"]
+    audits = scope["db"][mutations.COLL_AUDIT].docs
+    assert len(audits) == 1 and audits[0]["ok"] is True
 
 
 # G04: чужие resource ID в настройках отвергаются сервером и не сохраняются.

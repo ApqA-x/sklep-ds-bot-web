@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
+from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
 
 from api import auth as auth_module
@@ -26,7 +28,8 @@ def _meta_payload(path: str):
         cid = path.split("/")[2]
         return {"id": cid, "guild_id": GUILD, "type": 2 if cid == VOICE else 0}
     if path.startswith("/invites/"):
-        return {"code": path.rsplit("/", 1)[1], "guild_id": GUILD}
+        # R26-05: официальный Invite object — принадлежность вложенном поле "guild"
+        return {"code": path.rsplit("/", 1)[1], "guild": {"id": GUILD, "name": "G"}}
     if path.endswith("/roles") and path.startswith("/guilds/"):
         return [{"id": ROLE, "name": "role"}]
     return {"id": USER}
@@ -70,6 +73,55 @@ def _client(**cfg_overrides) -> TestClient:
     overrides.update(cfg_overrides)
     cfg = WebConfig(mongo_uri="", mongo_db="", **overrides)
     return TestClient(create_app(config=cfg, db=FakeDB()))
+
+
+def _bare_request() -> Request:
+    """Request только для _cfg(request): маршрутизатор/параметры пути _check_invite не нужны."""
+    from fastapi import FastAPI
+
+    app = FastAPI()
+    app.state.config = WebConfig(mongo_uri="", mongo_db="", discord_token="bot-token-fake")
+    return Request({"type": "http", "method": "GET", "path": "/", "headers": [], "query_string": b"", "app": app})
+
+
+# R26-05: fail-closed разбор официального Invite object (вложенный guild.id).
+# Плоский payload «как в старом фейке» больше не принимается ни в какой форме.
+@pytest.mark.parametrize(
+    ("status", "payload", "expected"),
+    [
+        (200, {"code": "c1", "guild": {"id": GUILD, "name": "G"}}, None),  # своя гильдия — пропуск
+        (200, {"code": "c1", "guild_id": GUILD}, 403),  # старая плоская форма — не читаем
+        (200, {"code": "c1"}, 403),  # group DM: guild отсутствует
+        (200, {"code": "c1", "guild": GUILD}, 403),  # guild не dict
+        (200, {"code": "c1", "guild": {}}, 403),  # guild без id
+        (200, {"code": "c1", "guild": {"id": ""}}, 403),  # пустой id
+        (200, {"code": "c1", "guild": {"id": "999999999999999999"}}, 403),  # чужая гильдия
+        (403, {"message": "Missing Permissions"}, 502),  # отказ Discord — не пропускаем
+        (401, {"message": "Unauthorized"}, 502),
+        (429, {"message": "rate limited"}, 502),
+        (500, {"message": "server error"}, 502),
+        (200, "not-a-dict", 502),  # неразбираемый ответ
+        (404, {"message": "Unknown Invite"}, 404),
+    ],
+)
+def test_check_invite_fail_closed_matrix(
+    monkeypatch: pytest.MonkeyPatch, status: int, payload: object, expected: int | None
+) -> None:
+    seen: list[tuple[str, str]] = []
+    mutations: list[tuple[str, str]] = []
+
+    async def fake_request(cfg, method, path, *, json_body=None, reason=None, files=None):
+        (seen if method == "GET" else mutations).append((method, path))
+        return status, payload
+
+    monkeypatch.setattr(discord_api, "bot_request", fake_request)
+    if expected is None:
+        asyncio.run(bot_module._check_invite(_bare_request(), GUILD, "c1"))
+    else:
+        with pytest.raises(HTTPException) as caught:
+            asyncio.run(bot_module._check_invite(_bare_request(), GUILD, "c1"))
+        assert caught.value.status_code == expected
+    assert mutations == []  # ни в одном исходе проверка не делает изменяющий вызов
 
 
 def test_role_grant_and_revoke(calls: list[dict]) -> None:

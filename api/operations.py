@@ -56,6 +56,12 @@ KINDS: dict[str, dict[str, str]] = {
     "bot.kick": {"idempotent": "none", "reconcile": "manual"},
     "bot.message": {"idempotent": "none", "reconcile": "manual"},  # nonce/enforce_nonce дедупликацию не доказываем
     "bot.invite.create": {"idempotent": "none", "reconcile": "manual"},
+    # R26-04: локальные DB-мутации панели тоже ведут durable-след в этом журнале
+    # (intent до эффекта; audit — идемпотентная проекция с детерминированным _id).
+    "db.settings.patch": {"idempotent": "revision", "reconcile": "settings-document"},
+    "db.list.mutate": {"idempotent": "state", "reconcile": "settings-document"},
+    "db.stalker.mutate": {"idempotent": "state", "reconcile": "stalker-collection"},
+    "db.preset.mutate": {"idempotent": "none", "reconcile": "preset-collection"},
 }
 
 TERMINAL = ("succeeded", "failed", "unknown")
@@ -309,6 +315,12 @@ def extract_result(kind: str, status: int, payload: Any) -> dict[str, Any]:
             if payload.get("url"):
                 result["inviteUrl"] = str(payload["url"])
     return result
+
+
+def audit_entry_id(guild_id: str, operation_id: str) -> str:
+    """R26-04: детерминированный _id audit-проекции — повторная проекция той же
+    операции физически не создаёт дубль (unique по _id держится и на standalone Mongo)."""
+    return hashlib.sha256(f"audit\u001f{guild_id}\u001f{operation_id}".encode()).hexdigest()
 
 
 def file_digest(blob: bytes) -> str:

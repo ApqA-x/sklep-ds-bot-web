@@ -6,6 +6,7 @@ import { api } from "./api/client";
 import { nameOf, useNames } from "./names";
 import { useGuild } from "./guild";
 import { clearDrafts } from "./screens/settingsDraft";
+import { clearAllIntents } from "./api/intents";
 
 export default function Layout() {
   const { guildId } = useParams<{ guildId: string }>();
@@ -55,6 +56,7 @@ export default function Layout() {
               onClick={async () => {
                 await api.logout();
                 clearDrafts(); // U05: черновики настроек не переживают выход/смену пользователя
+                clearAllIntents(); // R26-03.8: намерения/статусы операций — тоже
                 queryClient.clear();
                 navigate("/");
               }}

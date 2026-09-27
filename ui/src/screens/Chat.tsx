@@ -8,7 +8,9 @@ import { InputTextarea } from "primereact/inputtextarea";
 import { InputText } from "primereact/inputtext";
 import { TabView, TabPanel } from "primereact/tabview";
 import { ColorPicker } from "primereact/colorpicker";
-import { api, newOperationKey, useCanWrite } from "../api/client";
+import { api, ApiError, newOperationKey, useCanWrite } from "../api/client";
+import { clearIntent, fingerprint, loadIntent, parseOperationDetail, saveIntent } from "../api/intents";
+import type { BotOperationStatus } from "../api/client";
 import type { ChatAttachment, ChatMessage, ChatPreset, EmbedSpec } from "../api/types";
 import { TargetUserPicker } from "../components/userSearch";
 import { DateField } from "../components/dateField";
@@ -95,7 +97,115 @@ const ATTACH_MAX_TOTAL_BYTES = 50 * 1024 * 1024;
 // бэкендный бакет на гилдию: 5 burst, 2/с — держим паузу между каналами
 const SEND_PAUSE_MS = 550;
 
-type SendResult = { channelId: string; ok: boolean; error?: string };
+type SendResult = { channelId: string; ok: boolean; error?: string; unproven?: boolean };
+
+// R26-03.6: исход «unknown» недоказуем в обе стороны — не «не отправлено».
+const STATE_LABELS: Record<string, string> = {
+  requested: "в очереди",
+  executing: "исполняется",
+  succeeded: "успех",
+  failed: "отказ",
+  unknown: "не подтверждён",
+};
+
+function summarizeBatch(ops: BotOperationStatus[]): string {
+  if (ops.length === 0) return "операции не найдены";
+  const counts = new Map<string, number>();
+  for (const op of ops) counts.set(op.state, (counts.get(op.state) ?? 0) + 1);
+  return [...counts].map(([s, n]) => `${STATE_LABELS[s] ?? s}: ${n}`).join(", ");
+}
+
+function sendErrorInfo(err: unknown): { text: string; unproven: boolean } {
+  if (err instanceof ApiError) {
+    const op = parseOperationDetail(err.detail);
+    if (op?.unknown) return { text: "исход не подтверждён — проверьте статус отправки", unproven: true };
+    return { text: err.message, unproven: false };
+  }
+  return { text: err instanceof Error ? err.message : String(err), unproven: false };
+}
+
+// R26-03.6/7/8: batchId+child-ключ — состояние намерения, живущее в sessionStorage
+// до fetch. Пока payload (отпечаток) не изменился, повтор/перезагрузка использует тот
+// же batchId → серверный журнал дедуплицирует. После успеха намерение снимается.
+function useSendBatch(guildId: string, tab: string) {
+  const [batchId, setBatchId] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  // незавершённое намерение после reload/потери ответа — точка входа к сверке
+  const resumed = loadIntent(guildId, tab);
+  const begin = (fp: string): string => {
+    const prev = loadIntent(guildId, tab);
+    const id = prev && prev.fp === fp ? prev.batchId : newOperationKey();
+    saveIntent(guildId, tab, { batchId: id, fp });
+    setBatchId(id);
+    setStatus(null);
+    return id;
+  };
+  const succeed = () => {
+    clearIntent(guildId, tab);
+    setBatchId(null);
+    setStatus(null);
+  };
+  const check = async (explicitId?: string | null) => {
+    const target = explicitId ?? batchId;
+    if (!target) return;
+    try {
+      const batch = await api.botBatch(guildId, target);
+      setStatus(summarizeBatch(batch.operations));
+      if (batch.allSucceeded) clearIntent(guildId, tab);
+    } catch (err) {
+      setStatus(err instanceof Error ? err.message : String(err));
+    }
+  };
+  return { batchId, status, resumed, begin, succeed, check };
+}
+
+// R26-03.6: результаты батча с различимым «не подтверждено» и восстановлением статуса
+// через GET /operations?batchId (ранее эндпоинты botOperation/botBatch существовали,
+// но UI их не вызывал — потеря ответа = «отправить заново вслепую»).
+function SendResultsView({
+  results,
+  nameOfChannel,
+  intent,
+}: {
+  results: SendResult[] | null;
+  nameOfChannel: (id: string) => string;
+  intent: ReturnType<typeof useSendBatch>;
+}) {
+  const has = results !== null && results.length > 0;
+  const allOk = has && results!.every((r) => r.ok);
+  return (
+    <>
+      {!has && intent.resumed && (
+        <p className="hint">
+          найдено незавершённое намерение отправки —{" "}
+          <Button
+            text
+            size="small"
+            onClick={() => void intent.check(intent.resumed?.batchId ?? null)}
+            label="проверить статус"
+          />
+        </p>
+      )}
+      {has && (
+        <ul className="send-results">
+          {results!.map((r) => (
+            <li key={r.channelId} className={r.ok ? "ok" : r.unproven ? "warn" : "fail"}>
+              {r.ok ? "✓" : r.unproven ? "⚠" : "✗"} #{nameOfChannel(r.channelId)}
+              {r.error ? ` — ${r.error}` : ""}
+            </li>
+          ))}
+        </ul>
+      )}
+      {has && !allOk && (
+        <Button text size="small" onClick={() => void intent.check()} label="проверить статус отправки" />
+      )}
+      {intent.status && <p className="muted tiny">статус: {intent.status}</p>}
+      {has && allOk && (
+        <p className="muted tiny">отправлено; в ленте сообщения появятся через несколько секунд</p>
+      )}
+    </>
+  );
+}
 
 function validateAttachments(next: File[]): string | null {
   if (next.length > ATTACH_MAX_FILES) return `не больше ${ATTACH_MAX_FILES} файлов`;
@@ -120,6 +230,7 @@ function BotSendPanel({ guildId }: { guildId: string }) {
   const [sending, setSending] = useState(false);
   const [armed, setArmed] = useState(false); // первое нажатие при N>1 — только взводишь подтверждение
   const [results, setResults] = useState<SendResult[] | null>(null);
+  const intent = useSendBatch(guildId, "text");
   const fileInput = useRef<HTMLInputElement>(null);
 
   const presets = useQuery({
@@ -159,18 +270,28 @@ function BotSendPanel({ guildId }: { guildId: string }) {
     setSending(true);
     setResults([]);
     const out: SendResult[] = [];
-    const batchId = newOperationKey();
+    // R26-03.6: намерение (batchId + стабильные child-ключи) фиксируется ДО fetch —
+    // обрыв/повтор того же содержимого не создаёт второго сообщения
+    const fp = fingerprint({
+      content: body,
+      files: attach.map((f) => ({ name: f.name, size: f.size, lastModified: f.lastModified })),
+    });
+    const batchId = intent.begin(fp);
     for (const channelId of channels) {
       try {
         await api.botMessage(guildId, channelId, body, attach, null, { batchId });
         out.push({ channelId, ok: true });
       } catch (err) {
-        out.push({ channelId, ok: false, error: err instanceof Error ? err.message : String(err) });
+        const info = sendErrorInfo(err);
+        out.push({ channelId, ok: false, error: info.text, unproven: info.unproven });
       }
       setResults([...out]);
       await new Promise((r) => setTimeout(r, SEND_PAUSE_MS));
     }
     setSending(false);
+    // R26-03.7: намерение переживает только недоказанные исходы (unknown);
+    // failed — доказанное отсутствие эффекта, повтор законен новым намерением
+    if (!out.some((r) => r.unproven)) intent.succeed();
     if (clearOnOk && out.every((r) => r.ok)) {
       setText("");
       setFiles([]);
@@ -340,19 +461,7 @@ function BotSendPanel({ guildId }: { guildId: string }) {
         </span>
         {needsConfirm && !armed && !sending && <span className="muted tiny">отправка попросит подтверждение</span>}
       </div>
-      {results && results.length > 0 && (
-        <ul className="send-results">
-          {results.map((r) => (
-            <li key={r.channelId} className={r.ok ? "ok" : "fail"}>
-              {r.ok ? "✓" : "✗"} #{nameOfChannel(r.channelId)}
-              {r.error ? ` — ${r.error}` : ""}
-            </li>
-          ))}
-        </ul>
-      )}
-      {results && results.length > 0 && results.every((r) => r.ok) && (
-        <p className="muted tiny">отправлено; в ленте сообщения появятся через несколько секунд</p>
-      )}
+      <SendResultsView results={results} nameOfChannel={nameOfChannel} intent={intent} />
     </div>
   );
 }
@@ -465,6 +574,7 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
   const [sending, setSending] = useState(false);
   const [armed, setArmed] = useState(false);
   const [results, setResults] = useState<SendResult[] | null>(null);
+  const intent = useSendBatch(guildId, "embed");
   const fileInputs = useRef<Record<EmbedSlot, HTMLInputElement | null>>({
     image: null,
     thumbnail: null,
@@ -591,22 +701,31 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
       .map((r) => (r.file.name === r.name ? r.file : new File([r.file], r.name, { type: r.file.type })));
     const caption = form.caption.trim();
     const out: SendResult[] = [];
-    const batchId = newOperationKey();
+    // R26-03.6: намерение фиксируется до fetch; повтор того же содержимого — тот же batchId
+    const fp = fingerprint({
+      content: caption,
+      embed: spec,
+      files: files.map((f) => ({ name: f.name, size: f.size, lastModified: f.lastModified })),
+    });
+    const batchId = intent.begin(fp);
     for (const channelId of targets) {
       try {
         await api.botMessage(guildId, channelId, caption, files, spec, { batchId });
         out.push({ channelId, ok: true });
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        out.push({ channelId, ok: false, error: message });
-        const field = fieldOfApiError(message);
+        const info = sendErrorInfo(err);
+        out.push({ channelId, ok: false, error: info.text, unproven: info.unproven });
+        const field = fieldOfApiError(info.text);
         setErrFields(new Set(field ? [field] : []));
-        setSendError(message);
+        setSendError(info.text);
       }
       setResults([...out]);
       await new Promise((r) => setTimeout(r, SEND_PAUSE_MS));
     }
     setSending(false);
+    // R26-03.7: намерение переживает только недоказанные исходы (unknown);
+    // failed — доказанное отсутствие эффекта, повтор законен новым намерением
+    if (!out.some((r) => r.unproven)) intent.succeed();
   };
 
   const applyPreset = (preset: ChatPreset) => {
@@ -887,19 +1006,7 @@ function EmbedSendPanel({ guildId }: { guildId: string }) {
         </Button>
         {needsConfirm && !armed && !sending && <span className="muted tiny">отправка попросит подтверждение</span>}
       </div>
-      {results && results.length > 0 && (
-        <ul className="send-results">
-          {results.map((r) => (
-            <li key={r.channelId} className={r.ok ? "ok" : "fail"}>
-              {r.ok ? "✓" : "✗"} #{nameOfChannel(r.channelId)}
-              {r.error ? ` — ${r.error}` : ""}
-            </li>
-          ))}
-        </ul>
-      )}
-      {results && results.length > 0 && results.every((r) => r.ok) && (
-        <p className="muted tiny">отправлено; в ленте сообщения появятся через несколько секунд</p>
-      )}
+      <SendResultsView results={results} nameOfChannel={nameOfChannel} intent={intent} />
     </div>
   );
 }

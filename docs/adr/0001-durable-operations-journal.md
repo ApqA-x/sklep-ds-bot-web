@@ -52,6 +52,13 @@ message/kick/invite).
    (успешен, только когда все children терминальны и succeeded).
 10. **Slash-журнал бота**: поле `stage`: `invocation` / `rejected` / `effect`
     (консервативный список `MUTATING_ROUTES`; неизвестный маршрут — не выдаёт эффект).
+11. **Локальные DB-мутации** (R26-04): настройки, списки trusted/autoUnmute, stalker и
+    чат-пресеты пишутся под тем же порядком intent→claim→effect→finish (kind'ы `db.*`);
+    применённые `before`/`after` (включая revision CAS-записи) попадают в `result`,
+    аудит — идемпотентная проекция с детерминированным `_id = sha256(audit|guildId|operationId)`.
+    Сбой проекции остаётся видимым (`auditError`), bounded-recovery наблюдаем через
+    `GET /bot/operations/{id}` (повторная проекция той же операции) и
+    `reproject_pending_audits` — без повторной мутации.
 
 ## Последствия
 - Хранение ключей/журнала: `RETENTION_DAYS=90` — одно обещание с migration M2

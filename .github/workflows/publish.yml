@@ -10,10 +10,19 @@ on:
         description: "Существующий тег vMAJOR.MINOR.PATCH для публикации (пройдёт тот же gate)"
         required: true
 
-# T15/п.5 (CI03): публикация возможна только для SHA, на котором ci.yml
-# уже закончился success, и только если этот SHA достижим из main. Ни тег из
-# случайной ветки, ни ручной dispatch не обходят гейт — dispatch обязан
+# R26-11/V26-26 (было T15/п.5 CI03): публикация только с SHA, который реально
+# лежит в истории main и на котором ci.yml закончился зелёным. Оба гейта —
+# через scripts/release_gate.py, а не gh api:
+# - "SHA достижим из main" считаем по графу Git (`git merge-base --is-ancestor`);
+#   gh api compare отдаёт ahead/behind как relative-статус ветки — двусмысленно;
+# - зелёный CI решает самый СВЕЖИЙ run каждого обязательного job'а: старый green
+#   не перекрывает свежий red rerun, а in_progress/cancelled/missing — не success.
+# Ни тег из случайной ветки, ни ручной dispatch не обходят гейт — dispatch обязан
 # назвать существующий тег, и он проверяется идентично.
+# R26-11/V26-27: build пушит только кандидат ci-<SHA>; version/minor/latest
+# навешивает job promote ПОСЛЕ smoke конкретного digest — провалившийся смоук
+# больше не застанет latest уже сдвинутым. Ничего не удаляем: старые версии
+# остаются в registry.
 
 env:
   IMAGE: ghcr.io/${{ github.repository_owner }}/sklep-ds-bot-web
@@ -52,34 +61,28 @@ jobs:
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
           echo "тег $TAG -> коммит $SHA"
 
-      - name: SHA достижим из main (не тег из чужой ветки)
+      # полная история main: merge-base работает по настоящему графу (R26-11)
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: SHA достижим из main (граф Git, не gh compare)
+        env:
+          SHA: ${{ steps.resolve.outputs.sha }}
+        run: python3 scripts/release_gate.py ancestry --candidate "$SHA"
+
+      - name: CI на этом SHA прошёл зелёным (решает самый свежий run)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SHA: ${{ steps.resolve.outputs.sha }}
         run: |
-          STATUS=$(gh api "repos/$GITHUB_REPOSITORY/compare/$SHA...main" --jq .status)
-          # behind|identical: коммит лежит в истории main; ahead/diverged — нет
-          case "$STATUS" in
-            behind|identical) echo "SHA в истории main (status=$STATUS)";;
-            *) echo "SHA НЕ в истории main (status=$STATUS) — публикация запрещена"; exit 1;;
-          esac
+          # обязательные job'ы ci.yml; список = --required одной строкой (п.6)
+          gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs" --paginate > /tmp/checks.json
+          python3 scripts/release_gate.py conclusions --checks /tmp/checks.json --required api,integration,ui,ui-e2e
 
-      - name: CI на этом SHA прошёл зелёным
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SHA: ${{ steps.resolve.outputs.sha }}
-        run: |
-          # обязательные job'ы ci.yml; имена = реальные названия джобов (п.6)
-          for REQUIRED in api integration ui ui-e2e; do
-            OK=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/check-runs" --paginate \
-              --jq "[.check_runs[] | select(.name == \"$REQUIRED\") | select(.status == \"completed\" and .conclusion == \"success\")] | length")
-            if [ "$OK" -lt 1 ]; then
-              echo "check '$REQUIRED' не найден зелёным на $SHA — сначала зелёный CI"
-              exit 1
-            fi
-            echo "gate: $REQUIRED ok"
-          done
-
+  # R26-11/V26-27: здесь только кандидатный тег ci-<полный SHA>. Публичные
+  # version/minor/latest двигает promote после смоука этого digest.
   build:
     needs: gate
     runs-on: ubuntu-24.04
@@ -101,39 +104,31 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # теги считаем из проверенного имени тега (dispatch больше не публикует
-      # «текущий ref»): version, major.minor, и latest только для релизных тегов
-      - name: Image tags
+      - name: Candidate image ref
         id: tags
-        env:
-          VERSION: ${{ needs.gate.outputs.version }}
         run: |
           IMAGE_LC=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')  # GHCR требует lowercase
-          TAGS="$IMAGE_LC:$VERSION,$IMAGE_LC:${VERSION%.*}"
-          case "$VERSION" in
-            *-*) ;;  # пре-релиз: latest не трогаем
-            *) TAGS="$TAGS,$IMAGE_LC:latest";;
-          esac
-          echo "tags=$TAGS" >> "$GITHUB_OUTPUT"
-          echo "revision=${{ needs.gate.outputs.sha }}" >> "$GITHUB_OUTPUT"
+          echo "image_lc=$IMAGE_LC" >> "$GITHUB_OUTPUT"
 
-      - name: Build and push
+      - name: Build and push candidate
         uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.tags.outputs.tags }}
+          tags: ${{ steps.tags.outputs.image_lc }}:ci-${{ needs.gate.outputs.sha }}
           labels: |
-            org.opencontainers.image.revision=${{ steps.tags.outputs.revision }}
+            org.opencontainers.image.revision=${{ needs.gate.outputs.sha }}
             org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # CI07: смоук именно опубликованного digest на целевой платформе, а не
-  # заново собранного checkout. healthz=liveness: 200 только когда uvicorn
-  # реально поднялся на locked-зависимостях (dev-режим конфига, своя одноразовая
-  # Mongo — приложение при старте сверяет схему, поэтому без БД не стартует).
+  # R26-11/V26-27 (было CI07): смоук опубликованного digest кандидата ci-<SHA>,
+  # а не заново собранного checkout. Перед запуском сверяем OCI revision
+  # манифеста с проверенным gate'ом SHA (не тот образ = не тот результат).
+  # healthz=liveness: 200 только когда uvicorn реально поднялся на
+  # locked-зависимостях (dev-режим конфига, своя одноразовая Mongo — приложение
+  # при старте сверяет схему, поэтому без БД не стартует).
   smoke:
     needs: [gate, build]
     runs-on: ubuntu-24.04
@@ -152,12 +147,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Smoke published digest
+      - name: Smoke published candidate digest
+        env:
+          SHA: ${{ needs.gate.outputs.sha }}
         run: |
           IMAGE_LC=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
-          DIGEST=$(docker buildx imagetools inspect "$IMAGE_LC:${{ needs.gate.outputs.version }}" \
+          DIGEST=$(docker buildx imagetools inspect "$IMAGE_LC:ci-$SHA" \
             --format '{{json .Manifest.Digest}}' | tr -d '"')
           echo "inspected $IMAGE_LC@$DIGEST"
+          REVISION=$(docker buildx imagetools inspect -o - "$IMAGE_LC@$DIGEST" | jq -r \
+            '.manifests[0].annotations["org.opencontainers.image.revision"] // .annotations["org.opencontainers.image.revision"] // empty')
+          if [ "$REVISION" != "$SHA" ]; then
+            echo "OCI revision '$REVISION' != SHA кандидата '$SHA' — смоук не того образа"
+            exit 1
+          fi
           # host-сеть: контейнер видит service-mongo на 127.0.0.1 и наружу
           # отдаёт 8000 без bridge-манипуляций
           docker run -d --name smoke --platform linux/amd64 --network host \
@@ -170,3 +173,35 @@ jobs:
           done
           docker logs smoke
           exit 1
+
+  # R26-11/V26-27: единственный шаг, двигающий публичные теги. Перетегирование
+  # сервером (imagetools create) уже проверенного digest — без пересборки и без
+  # git-тегов; latest по-прежнему только для релизных версий без дефиса.
+  promote:
+    needs: [gate, build, smoke]
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Promote candidate digest to release tags
+        env:
+          SHA: ${{ needs.gate.outputs.sha }}
+          VERSION: ${{ needs.gate.outputs.version }}
+        run: |
+          IMAGE_LC=$(echo "$IMAGE" | tr '[:upper:]' '[:lower:]')
+          DIGEST=$(docker buildx imagetools inspect "$IMAGE_LC:ci-$SHA" \
+            --format '{{json .Manifest.Digest}}' | tr -d '"')
+          TARGETS=(-t "$IMAGE_LC:$VERSION" -t "$IMAGE_LC:${VERSION%.*}")
+          case "$VERSION" in
+            *-*) ;;  # пре-релиз: latest не трогаем
+            *) TARGETS+=(-t "$IMAGE_LC:latest");;
+          esac
+          docker buildx imagetools create "${TARGETS[@]}" "$IMAGE_LC@$DIGEST"
+          echo "$IMAGE_LC@$DIGEST -> ${TARGETS[*]}"

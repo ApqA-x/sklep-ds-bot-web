@@ -208,9 +208,13 @@ def _guard_stream(request: Request) -> None:
 
 def _op_key(request: Request) -> str:
     """Ключ идемпотентности присылает клиент (T08.9): повтор доставки — прежний key,
-    новая попытка — новый. Без заголовка journal ведёт per-attempt (dedup невозможен)."""
+    новая попытка — новый. Без заголовка journal ведёт per-attempt (dedup невозможен).
+    R26-03.9: формат и длина пришедшего ключа проверяются (клиентский ключ — uuid или
+    «batchId:channelId»; произвольная строка в журнал/URL статусов не попадёт)."""
     key = request.headers.get("idempotency-key", "").strip()
-    return key or operations.new_id()
+    if not key:
+        return operations.new_id()
+    return operations.validate_key(key, "idempotency-key")
 
 
 def _audit(
@@ -242,18 +246,55 @@ def _audit(
         operations.mark_audit_error(db, op_id)
 
 
+async def _finish(
+    db: Any, op_id: str, claimed: dict[str, Any], state: str, **kw: Any
+) -> dict[str, Any]:
+    """Финал с проверкой fence (R26-03.1).
+
+    `finish()` возвращает False при потере fence — прежний «слепой» вызов позволял
+    отдать HTTP succeeded, пока журнал остаётся executing, и старый worker писал
+    успешный audit поверх чужой попытки. Здесь: False или сбой БД превращаются в
+    честное 504 с фактическим состоянием журнала; audit не пишется без права финала.
+    """
+    try:
+        won = await asyncio.to_thread(operations.finish, db, op_id, claimed, state, **kw)
+    except Exception as exc:  # noqa: BLE001 — внешний эффект уже мог случиться, журнал недоступен
+        raise HTTPException(
+            status_code=504,
+            detail={"error": "journal_unavailable_after_effect", "operationId": op_id},
+        ) from exc
+    if not won:
+        current = await asyncio.to_thread(operations.read_current, db, op_id)
+        raise HTTPException(
+            status_code=504,
+            detail={
+                "error": "ownership_lost",
+                "operationId": op_id,
+                "state": current.get("state") if current else None,
+            },
+        )
+    return kw.get("result") or {}
+
+
 async def _action(
     request: Request,
     kind: str,
     action: str,
     arguments: dict[str, Any],
     run: Any,
+    *,
+    identity: dict[str, Any] | None = None,
 ) -> dict:
     """T08: устойчивый intent → атомарный claim → внешний эффект → финал.
 
     Ни один вызов Discord не происходит до успешной записи намерения (O01).
     Повтор терминальной операции возвращает сохранённый факт без нового эффекта (O04);
     unknown не переигрывается вслепую (O05); lease/fencing — в operations.claim/finish.
+
+    R26-03: `run(args)` исполняется на аргументах из durable-документа, а не из
+    локальной копии вызова — retry/takeover повторяют исходный намеренный payload
+    (в том числе исходный абсолютный дедлайн timeout.set). `identity` — канонический
+    запрос для requestHash, когда часть args выводима из момента записи.
     """
     db = request.app.state.db
     if db is None:
@@ -271,6 +312,7 @@ async def _action(
         arguments=arguments,
         idempotency_key=_op_key(request),
         batch_id=request.headers.get("x-batch-id") or None,
+        identity=identity,
     )
     op_id = doc["_id"]
     if doc.get("state") in operations.TERMINAL:
@@ -288,33 +330,29 @@ async def _action(
     if claimed_pair is None:
         raise HTTPException(status_code=409, detail={"error": "operation_in_progress", "operationId": op_id})
     claimed, mode = claimed_pair
+    # единый источник аргументов для effect и audit — документ журнала
+    args = doc.get("arguments") or arguments
     if mode == "takeover" and not operations.is_idempotent(kind):
         # O07: переживший lease не доказывает ни эффект, ни его отсутствие;
         # для неидемпотентного kind слепой повтор запрещён — остаёмся unknown.
+        await _finish(db, op_id, claimed, "unknown", error={"classification": "lease_expired_unproven"})
         await asyncio.to_thread(
-            operations.finish, db, op_id, claimed, "unknown", error={"classification": "lease_expired_unproven"}
-        )
-        await asyncio.to_thread(
-            _audit, db, guild, actor, action, arguments, status=None,
+            _audit, db, guild, actor, action, args, status=None,
             detail={"classification": "lease_expired_unproven"}, ok=False, op_id=op_id,
         )
         raise HTTPException(status_code=504, detail={"error": "outcome_unproven", "operationId": op_id, "state": "unknown"})
     try:
-        status, payload = await run()
+        status, payload = await run(args)
     except HTTPException:
         # эффект не отправлялся (лимит/конфиг) — попытка честная, но без внешнего вызова
-        await asyncio.to_thread(
-            operations.finish, db, op_id, claimed, "failed", error={"classification": "not_dispatched"}
-        )
+        await _finish(db, op_id, claimed, "failed", error={"classification": "not_dispatched"})
         raise
     except Exception as exc:  # noqa: BLE001 — транспорт: distinguish «не ушло» vs «неизвестно» (O05/O06)
         classification, definitely_no_effect = operations.classify_transport(exc)
         state = "failed" if definitely_no_effect else "unknown"
+        await _finish(db, op_id, claimed, state, error={"classification": classification})
         await asyncio.to_thread(
-            operations.finish, db, op_id, claimed, state, error={"classification": classification}
-        )
-        await asyncio.to_thread(
-            _audit, db, guild, actor, action, arguments, status=None,
+            _audit, db, guild, actor, action, args, status=None,
             detail={"classification": classification}, ok=False, op_id=op_id,
         )
         raise HTTPException(
@@ -323,21 +361,31 @@ async def _action(
     ok = 200 <= status < 300
     detail = payload if isinstance(payload, dict) else {"raw": str(payload)[:300]}
     if ok:
-        result: dict[str, Any] = {"discordStatus": status}
-        resource_id = detail.get("id") if isinstance(detail, dict) else None
-        if resource_id:
-            result["discordResourceId"] = str(resource_id)  # T08.7: зацепка для ручной сверки
-        await asyncio.to_thread(operations.finish, db, op_id, claimed, "succeeded", result=result)
-    else:
+        result = operations.extract_result(kind, status, detail)  # R26-03.4: id/code в durable-результат
+        await _finish(db, op_id, claimed, "succeeded", result=result)
+    elif status >= 500:
+        # R26-03.2: 5xx не доказывает отсутствие эффекта — запрос дошёл до Discord
+        await _finish(
+            db, op_id, claimed, "unknown",
+            error={"classification": "discord_server_error", "discordStatus": status, "body": detail},
+        )
         await asyncio.to_thread(
-            operations.finish, db, op_id, claimed, "failed", error={"discordStatus": status, "body": detail}
+            _audit, db, guild, actor, action, args, status=status, detail=detail, ok=False, op_id=op_id,
+        )
+        raise HTTPException(
+            status_code=504,
+            detail={"error": "outcome_unproven", "discordStatus": status, "operationId": op_id, "state": "unknown"},
+        )
+    else:
+        await _finish(
+            db, op_id, claimed, "failed", error={"discordStatus": status, "body": detail}
         )
     await asyncio.to_thread(
-        _audit, db, guild, actor, action, arguments, status=status, detail=detail, ok=ok, op_id=op_id,
+        _audit, db, guild, actor, action, args, status=status, detail=detail, ok=ok, op_id=op_id,
     )
     if not ok:
         raise HTTPException(status_code=502, detail={"discordStatus": status, "body": detail, "operationId": op_id})
-    return {"ok": True, "discordStatus": status, "operationId": op_id, "state": "succeeded"}
+    return {"ok": True, "discordStatus": status, "operationId": op_id, "state": "succeeded", "result": result}
 
 
 @router.post("/member/{userId}/roles")
@@ -352,7 +400,7 @@ async def member_role(request: Request, guildId: str, userId: str, body: MemberR
         f"bot.role.{body.action}",
         "role",
         {"userId": userId, "roleId": body.roleId, "action": body.action},
-        lambda: _call(request, method, f"/guilds/{guildId}/members/{userId}/roles/{body.roleId}"),
+        lambda _args: _call(request, method, f"/guilds/{guildId}/members/{userId}/roles/{body.roleId}"),
     )
 
 
@@ -361,19 +409,26 @@ async def member_timeout(request: Request, guildId: str, userId: str, body: Time
     _snowflake(guildId, "guildId")
     _snowflake(userId, "userId")
     await _check_member(request, guildId, userId)
+    # R26-03.4: абсолютный дедлайн вычисляется один раз при записи намерения и
+    # хранится в журнале; retry/takeover повторяют его, а не сдвигают на now+seconds.
+    # В requestHash входит только identity (seconds) — поздний повтор того же
+    # намерения не превращается в 409 из-за свежей отметки времени.
+    arguments: dict[str, Any] = {"userId": userId, "mute": body.mute, "seconds": body.seconds if body.mute else None}
     if body.mute:
-        until = (datetime.now(timezone.utc) + timedelta(seconds=body.seconds)).isoformat()
-        json_body: dict[str, Any] | None = {"communication_disabled_until": until}
-    else:
-        json_body = {"communication_disabled_until": None}
+        arguments["deadlineAt"] = (datetime.now(timezone.utc) + timedelta(seconds=body.seconds)).isoformat()
     return await _action(
         request,
         "bot.timeout.set" if body.mute else "bot.timeout.clear",
         "timeout",
-        {"userId": userId, "mute": body.mute, "seconds": body.seconds if body.mute else None},
-        lambda: _call(
-            request, "PATCH", f"/guilds/{guildId}/members/{userId}", json_body=json_body, reason="voice_tracker web"
+        arguments,
+        lambda args: _call(
+            request,
+            "PATCH",
+            f"/guilds/{guildId}/members/{userId}",
+            json_body={"communication_disabled_until": args.get("deadlineAt") if args.get("mute") else None},
+            reason="voice_tracker web",
         ),
+        identity={"userId": userId, "mute": body.mute, "seconds": body.seconds if body.mute else None},
     )
 
 
@@ -388,7 +443,7 @@ async def member_move(request: Request, guildId: str, userId: str, body: MoveMem
         "bot.move",
         "move",
         {"userId": userId, "channelId": body.channelId},
-        lambda: _call(
+        lambda _args: _call(
             request,
             "PATCH",
             f"/guilds/{guildId}/members/{userId}",
@@ -407,7 +462,7 @@ async def member_disconnect(request: Request, guildId: str, userId: str) -> dict
         "bot.disconnect",
         "disconnect",
         {"userId": userId},
-        lambda: _call(
+        lambda _args: _call(
             request,
             "PATCH",
             f"/guilds/{guildId}/members/{userId}",
@@ -429,7 +484,7 @@ async def member_kick(request: Request, guildId: str, userId: str, body: KickMem
         "bot.kick",
         "kick",
         {"userId": userId, "reason": body.reason},
-        lambda: _call(request, "DELETE", f"/guilds/{guildId}/members/{userId}", reason=body.reason),
+        lambda _args: _call(request, "DELETE", f"/guilds/{guildId}/members/{userId}", reason=body.reason),
     )
 
 
@@ -452,9 +507,11 @@ async def channel_message(request: Request, guildId: str, channelId: str) -> dic
     json_body: dict[str, Any] = {}
     if content:
         json_body["content"] = content
+    embed_payload: dict | None = None
     if embed is not None:
         try:
-            json_body["embeds"] = [embed.discord_embed({name for name, _, _ in files})]
+            embed_payload = embed.discord_embed({name for name, _, _ in files})
+            json_body["embeds"] = [embed_payload]
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from None
     arguments: dict[str, Any] = {
@@ -465,15 +522,25 @@ async def channel_message(request: Request, guildId: str, channelId: str) -> dic
     }
     if embed is not None:
         arguments["embed"] = embed.audit_summary()
+    # R26-03.3: канонический запрос различает содержимое — sha256 байтов каждого файла
+    # и полный нормализованный embed (audit_summary сокращён и для дедупликации не годится).
+    identity: dict[str, Any] = {"channelId": channelId, "content": content or None, "embed": embed_payload}
     if files:
-        # в audit — только имена и размеры, не содержимое
-        arguments["attachments"] = [{"name": name, "size": len(blob)} for name, blob, _ in files]
+        # в audit — имена/размеры/digest, не содержимое
+        arguments["attachments"] = [
+            {"name": name, "size": len(blob), "sha256": operations.file_digest(blob)}
+            for name, blob, _ in files
+        ]
+        identity["attachments"] = [
+            {"name": name, "size": len(blob), "contentType": ctype, "sha256": operations.file_digest(blob)}
+            for name, blob, ctype in files
+        ]
     return await _action(
         request,
         "bot.message",
         "message",
         arguments,
-        lambda: _call(
+        lambda _args: _call(
             request,
             "POST",
             f"/channels/{channelId}/messages",
@@ -481,6 +548,7 @@ async def channel_message(request: Request, guildId: str, channelId: str) -> dic
             files=files or None,
             billed=True,
         ),
+        identity=identity,
     )
 
 
@@ -539,7 +607,7 @@ async def create_invite(request: Request, guildId: str, body: InviteCreateAction
         "bot.invite.create",
         "invite.create",
         {"channelId": body.channelId, "maxAge": body.maxAge, "maxUses": body.maxUses},
-        lambda: _call(
+        lambda _args: _call(
             request,
             "POST",
             f"/channels/{body.channelId}/invites",
@@ -559,19 +627,25 @@ async def delete_invite(request: Request, guildId: str, code: str) -> dict:
         "bot.invite.delete",
         "invite.delete",
         {"code": code},
-        lambda: _call(request, "DELETE", f"/invites/{code}"),
+        lambda _args: _call(request, "DELETE", f"/invites/{code}"),
     )
 
 
 @router.get("/operations/{operationId}")
 async def operation_status(request: Request, guildId: str, operationId: str) -> dict:
-    """T08.9: защищённое чтение статуса (тот же require_guild_admin + guild-scope T04)."""
+    """T08.9: защищённое чтение статуса (тот же require_guild_admin + guild-scope T04).
+
+    R26-03.5: чтение также выполняет bounded-recovery — зависший «executing» с
+    истёкшим lease становится наблюдаемым unknown. Внешних эффектов эндпоинт не
+    создаёт: одна CAS-правка журнала с fence-инкрементом.
+    """
     db = request.app.state.db
     if db is None:
         raise HTTPException(status_code=503, detail="database unavailable")
     doc = await asyncio.to_thread(operations.get_operation, db, guildId, operationId)
     if doc is None:
         raise HTTPException(status_code=404, detail="operation not found")
+    doc = await asyncio.to_thread(operations.reconcile_stale, db, doc)
     return operations.public_view(doc)
 
 
@@ -581,7 +655,17 @@ async def operation_batch(request: Request, guildId: str, batchId: str) -> dict:
     db = request.app.state.db
     if db is None:
         raise HTTPException(status_code=503, detail="database unavailable")
+    operations.validate_key(batchId, "batchId")
     docs = await asyncio.to_thread(operations.list_batch, db, guildId, batchId)
+    docs = [await asyncio.to_thread(operations.reconcile_stale, db, doc) for doc in docs]
     views = [operations.public_view(doc) for doc in docs]
     pending = [v for v in views if v["state"] not in operations.TERMINAL]
-    return {"batchId": batchId, "operations": views, "complete": not pending, "pending": len(pending)}
+    failed = [v for v in views if v["state"] != "succeeded"]
+    return {
+        "batchId": batchId,
+        "operations": views,
+        "complete": not pending,
+        "pending": len(pending),
+        # T08/R26-03.7: success батча — только когда все обязательные children succeeded
+        "allSucceeded": not pending and not failed,
+    }

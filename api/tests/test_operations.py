@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from api import auth as auth_module
@@ -45,7 +46,9 @@ def _meta_payload(path: str):
     return {"id": USER}
 
 
-def _install_discord(monkeypatch, *, status: int = 200, raises: Exception | None = None) -> list[dict]:
+def _install_discord(
+    monkeypatch, *, status: int = 200, raises: Exception | None = None, payload: dict | None = None
+) -> list[dict]:
     recorded: list[dict] = []
 
     async def fake_request(cfg, method, path, *, json_body=None, reason=None, files=None):
@@ -54,7 +57,7 @@ def _install_discord(monkeypatch, *, status: int = 200, raises: Exception | None
         if raises is not None:
             raise raises
         recorded.append({"method": method, "path": path, "json": json_body})
-        return status, {"id": "effect-1"}
+        return status, payload if payload is not None else {"id": "effect-1"}
 
     monkeypatch.setattr(discord_api, "bot_request", fake_request)
     bot_module._reset_rate_buckets()
@@ -190,7 +193,11 @@ def test_stale_lease_non_idempotent_takeover_refuses_blind_retry(monkeypatch) ->
         "actorUserId": "0",
         "kind": "bot.message",
         "arguments": {"channelId": CHANNEL, "length": len("hello"), "content": "hello"},
-        "requestHash": operations.canonical_hash("bot.message", {"channelId": CHANNEL, "length": 5, "content": "hello"}),
+        # R26-03.3: requestHash bot.message считается по каноническому identity
+        # (channelId + content + полный embed), а не по audit-аргументам.
+        "requestHash": operations.canonical_hash(
+            "bot.message", {"channelId": CHANNEL, "content": "hello", "embed": None}
+        ),
         "idempotencyKey": key,
         "batchId": None,
         "state": "executing",
@@ -379,3 +386,228 @@ def test_classify_transport_names() -> None:
     assert operations.classify_transport(ClientConnectorError("x")) == ("connection_not_established", True)
     assert operations.classify_transport(ServerDisconnectedError("x")) == ("connection_lost_after_send", False)
     assert operations.classify_transport(ValueError("x")) == ("transport_error", False)
+
+
+# ---------------------------------------------------------------------------
+# R26-03: достоверный результат операций — регрессии на подтверждённые дефекты
+# (пробы 26.09: lost_fence_reported_as_success, discord_500_treated_as_definite_failure)
+# ---------------------------------------------------------------------------
+
+
+def test_r26_lost_fence_is_not_reported_as_success(monkeypatch) -> None:
+    """finish()=False при потере fence: HTTP не смеет врать «succeeded», журнал не
+    получает чужого успеха, audit без права финализации не пишется (проба 1)."""
+    _install_discord(monkeypatch)
+    db = FakeDB()
+    client = _client(db)
+    audited: list = []
+    monkeypatch.setattr(bot_module, "_audit", lambda *a, **k: audited.append(k))
+    monkeypatch.setattr(operations, "finish", lambda *a, **k: False)
+    response = _grant(client, "k-r26fence")
+    assert response.status_code == 504
+    detail = response.json()["detail"]
+    assert detail["error"] == "ownership_lost"
+    assert detail["state"] == "executing"  # фактическое состояние журнала, не «succeeded»
+    assert audited == []  # старый worker не пишет успешный audit поверх нового fence
+
+
+def test_r26_journal_crash_after_effect_is_unproven(monkeypatch) -> None:
+    """Сбой БД при финале после успешного Discord-вызова — 504 с operationId, не ложный 200."""
+    _install_discord(monkeypatch)
+    db = FakeDB()
+    client = _client(db)
+
+    def boom(*a, **k):
+        raise RuntimeError("mongo down")
+
+    monkeypatch.setattr(operations, "finish", boom)
+    response = _grant(client, "k-r26crash")
+    assert response.status_code == 504
+    assert response.json()["detail"]["error"] == "journal_unavailable_after_effect"
+    assert response.json()["detail"]["operationId"]
+
+
+def test_r26_discord_5xx_stays_unknown_not_failed(monkeypatch) -> None:
+    """Discord 500 не доказывает отсутствие эффекта: unknown + 504; повтор тем же
+    ключом не переисполняет вслепую (проба 2)."""
+    calls = _install_discord(monkeypatch, status=500)
+    client = _client()
+    key = "k-r26-5xx"
+    url = f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message"
+    response = client.post(url, json={"content": "probe"}, headers={"Idempotency-Key": key})
+    assert response.status_code == 504
+    detail = response.json()["detail"]
+    assert detail["state"] == "unknown" and detail["error"] == "outcome_unproven"
+    doc = client.app.state.db["operations"].docs[0]  # type: ignore[union-attr]
+    assert doc["state"] == "unknown"
+    assert doc["error"]["classification"] == "discord_server_error"
+    # replay unknown — без нового эффекта
+    calls.clear()
+    again = client.post(url, json={"content": "probe"}, headers={"Idempotency-Key": key})
+    assert again.status_code == 504
+    assert again.json()["detail"]["state"] == "unknown"
+    assert calls == []
+
+
+def test_r26_discord_4xx_remains_definite_failure(monkeypatch) -> None:
+    """4xx — отказ до применения: по-прежнему failed (законный retry разрешён)."""
+    _install_discord(monkeypatch, status=403)
+    client = _client()
+    url = f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message"
+    response = client.post(url, json={"content": "probe"}, headers={"Idempotency-Key": "k-r26-4xx"})
+    assert response.status_code == 502
+    assert client.app.state.db["operations"].docs[0]["state"] == "failed"  # type: ignore[union-attr]
+
+
+def test_r26_same_size_different_files_are_different_requests(monkeypatch) -> None:
+    """Канонический запрос различает файлы одинаковой длины по содержимому (probe:
+    requestHash из имени/разряда больше не «тот же payload»)."""
+    _install_discord(monkeypatch)
+    client = _client()
+    url = f"/api/guild/{GUILD}/bot/channel/{CHANNEL}/message"
+    key = {"Idempotency-Key": "k-r26bytes"}
+    first = client.post(url, data={"content": "same"}, files={"files": ("a.bin", b"AAAA", "application/octet-stream")}, headers=key)
+    assert first.status_code == 200
+    second = client.post(url, data={"content": "same"}, files={"files": ("a.bin", b"BBBB", "application/octet-stream")}, headers=key)
+    assert second.status_code == 409
+    assert second.json()["detail"]["error"] == "idempotency_conflict"
+
+
+def test_r26_timeout_takeover_repeats_original_deadline(monkeypatch) -> None:
+    """Takeover timeout.set повторяет исходный абсолютный дедлайн из журнала,
+    а не сдвигает на now+seconds (R26-03.4)."""
+    calls = _install_discord(monkeypatch)
+    db = FakeDB()
+    client = _client(db)
+    key = "k-r26deadline"
+    original = (datetime.now(UTC) + timedelta(seconds=600)).isoformat()
+    arguments = {"userId": USER, "mute": True, "seconds": 600, "deadlineAt": original}
+    db["operations"].docs.append(
+        {
+            "_id": operations.operation_id(GUILD, "0", "bot.timeout.set", key),
+            "guildId": GUILD,
+            "actorUserId": "0",
+            "kind": "bot.timeout.set",
+            "arguments": arguments,
+            "requestHash": operations.canonical_hash("bot.timeout.set", {"userId": USER, "mute": True, "seconds": 600}),
+            "idempotencyKey": key,
+            "batchId": None,
+            "state": "executing",
+            "attempts": 1,
+            "fenceVersion": 1,
+            "leaseOwner": "dead-worker",
+            "leaseExpiresAt": datetime.now(UTC) - timedelta(seconds=5),
+            "createdAt": datetime.now(UTC),
+            "updatedAt": datetime.now(UTC),
+            "finishedAt": None,
+            "result": None,
+            "error": None,
+            "auditError": False,
+        }
+    )
+    response = client.post(
+        f"/api/guild/{GUILD}/bot/member/{USER}/timeout",
+        json={"mute": True, "seconds": 600},
+        headers={"Idempotency-Key": key},
+    )
+    assert response.status_code == 200  # idempotent-by-state kind — takeover разрешён
+    patch_calls = [c for c in calls if c["method"] == "PATCH"]
+    assert patch_calls, "эффект должен быть исполнен"
+    assert patch_calls[0]["json"]["communication_disabled_until"] == original
+    # поздний повтор того же намерения — не 409 (дедлайн-отметка не в identity)
+    again = client.post(
+        f"/api/guild/{GUILD}/bot/member/{USER}/timeout",
+        json={"mute": True, "seconds": 600},
+        headers={"Idempotency-Key": key},
+    )
+    assert again.status_code == 200 and again.json().get("replayed") is True
+
+
+def test_r26_invite_result_keeps_code_and_replays_identically(monkeypatch) -> None:
+    """invite.create сохраняет code/URL в durable-результат; replay возвращает их
+    без нового внешнего вызова (R26-03.4)."""
+    code = {"id": "inv-1", "code": "xyz123", "url": "https://discord.gg/xyz123"}
+    calls = _install_discord(monkeypatch, payload=code)
+    client = _client()
+    url = f"/api/guild/{GUILD}/bot/invite"
+    key = {"Idempotency-Key": "k-r26invite"}
+    first = client.post(url, json={"channelId": CHANNEL, "maxAge": 3600, "maxUses": 5}, headers=key)
+    assert first.status_code == 200
+    assert first.json()["result"]["inviteCode"] == "xyz123"
+    calls.clear()
+    replay = client.post(url, json={"channelId": CHANNEL, "maxAge": 3600, "maxUses": 5}, headers=key)
+    assert replay.status_code == 200
+    assert replay.json()["replayed"] is True
+    assert replay.json()["result"]["inviteCode"] == "xyz123"
+    assert calls == []  # второй invite не создавался
+
+
+def test_r26_status_read_reconciles_expired_lease(monkeypatch) -> None:
+    """GET статуса наблюдает зависший executing с истёкшим lease как unknown и не
+    трогает Discord (bounded recovery без внешних эффектов, R26-03.5)."""
+    calls = _install_discord(monkeypatch)
+    db = FakeDB()
+    client = _client(db)
+    key = "k-r26stale"
+    doc = {
+        "_id": operations.operation_id(GUILD, "0", "bot.message", key),
+        "guildId": GUILD,
+        "actorUserId": "0",
+        "kind": "bot.message",
+        "arguments": {"channelId": CHANNEL, "content": "hello"},
+        "requestHash": operations.canonical_hash("bot.message", {"channelId": CHANNEL, "content": "hello", "embed": None}),
+        "idempotencyKey": key,
+        "batchId": "b-r26stale",
+        "state": "executing",
+        "attempts": 1,
+        "fenceVersion": 3,
+        "leaseOwner": "vanished-worker",
+        "leaseExpiresAt": datetime.now(UTC) - timedelta(seconds=5),
+        "createdAt": datetime.now(UTC),
+        "updatedAt": datetime.now(UTC),
+        "finishedAt": None,
+        "result": None,
+        "error": None,
+        "auditError": False,
+    }
+    db["operations"].docs.append(doc)
+    status = client.get(f"/api/guild/{GUILD}/bot/operations/{doc['_id']}")
+    assert status.status_code == 200
+    assert status.json()["state"] == "unknown"
+    assert calls == []
+    batch = client.get(f"/api/guild/{GUILD}/bot/operations", params={"batchId": "b-r26stale"})
+    assert batch.status_code == 200
+    body = batch.json()
+    assert body["complete"] is True and body["allSucceeded"] is False
+
+
+def test_r26_key_format_enforced(monkeypatch) -> None:
+    _install_discord(monkeypatch)
+    client = _client()
+    url = _role_url()
+    bad = client.post(url, json={"roleId": ROLE, "action": "grant"}, headers={"Idempotency-Key": "bad key with spaces!"})
+    assert bad.status_code == 422
+    long = client.post(url, json={"roleId": ROLE, "action": "grant"}, headers={"Idempotency-Key": "z" * 129})
+    assert long.status_code == 422
+    ok = client.post(url, json={"roleId": ROLE, "action": "grant"}, headers={"Idempotency-Key": "b-1:" + CHANNEL})
+    assert ok.status_code == 200
+
+
+def test_r26_operations_ttl_matches_migration() -> None:
+    """Одно обещание контракта: RETENTION_DAYS в коде == OPERATIONS_TTL_SECONDS M2 (90d)."""
+    assert operations.RETENTION_DAYS == 90
+
+
+def test_r26_arguments_size_capped() -> None:
+    db = FakeDB()
+    with pytest.raises(HTTPException) as exc:
+        operations.create_intent(
+            db,
+            guild_id=GUILD,
+            actor={"userId": "0"},
+            kind="bot.message",
+            arguments={"content": "x" * (operations.MAX_ARGUMENTS_BYTES + 1)},
+            idempotency_key="k-r26big",
+        )
+    assert exc.value.status_code == 422
+    assert db["operations"].docs == []  # переполненный payload в журнал не попал

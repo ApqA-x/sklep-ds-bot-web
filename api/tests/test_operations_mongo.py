@@ -174,3 +174,56 @@ def test_batch_children_guild_scoped(db: Any) -> None:
     assert len(mine) == 2
     assert all(d["guildId"] == GUILD for d in mine)
     assert other_doc["_id"] not in [d["_id"] for d in mine]
+
+
+# R26-03.5: чтение-реcovery зависшего executing — настоящий CAS на Mongo.
+def test_reconcile_stale_real_cas(db: Any) -> None:
+    doc, _ = operations.create_intent(
+        db, guild_id=GUILD, actor=_actor(), kind="bot.message",
+        arguments={"channelId": "1", "content": "hi"}, idempotency_key="k-r26stale",
+    )
+    claimed, _mode = operations.claim(db, doc["_id"])
+    db[operations.COLL_OPERATIONS].update_one(
+        {"_id": doc["_id"]}, {"$set": {"leaseExpiresAt": datetime.now(UTC) - timedelta(seconds=1)}}
+    )
+    current = db[operations.COLL_OPERATIONS].find_one({"_id": doc["_id"]})
+    reconciled = operations.reconcile_stale(db, current)
+    assert reconciled["state"] == "unknown"
+    stored = db[operations.COLL_OPERATIONS].find_one({"_id": doc["_id"]})
+    assert stored["state"] == "unknown" and stored["fenceVersion"] == claimed["fenceVersion"] + 1
+    # прежний worker право финала потерял — его finish отбит
+    assert operations.finish(db, doc["_id"], claimed, "succeeded", result={"discordStatus": 200}) is False
+    # повторный reconcile идемпотен (терминальное состояние не трогаем)
+    assert operations.reconcile_stale(db, stored)["state"] == "unknown"
+    assert db[operations.COLL_OPERATIONS].find_one({"_id": doc["_id"]})["error"] == {
+        "classification": "lease_expired_unproven"
+    }
+
+
+# R26-03.4: identity-хэш не зависит от выводимой отметки дедлайна — поздний retry
+# того же намерения не превращается в 409, а переживает takeover с исходным deadline.
+def test_identity_hash_excludes_derived_deadline(db: Any) -> None:
+    identity = {"userId": "1", "mute": True, "seconds": 600}
+    first = datetime.now(UTC) + timedelta(seconds=600)
+    doc, created = operations.create_intent(
+        db, guild_id=GUILD, actor=_actor(), kind="bot.timeout.set",
+        arguments={**identity, "deadlineAt": first.isoformat()},
+        idempotency_key="k-r26dl", identity=identity,
+    )
+    assert created == "created"
+    second = datetime.now(UTC) + timedelta(seconds=601)  # момент повторного запроса — позже
+    again, state = operations.create_intent(
+        db, guild_id=GUILD, actor=_actor(), kind="bot.timeout.set",
+        arguments={**identity, "deadlineAt": second.isoformat()},
+        idempotency_key="k-r26dl", identity=identity,
+    )
+    assert state == "existing"
+    assert again["arguments"]["deadlineAt"] == first.isoformat()  # исходный дедлайн сохранён
+    # другой payload при том же ключе — по-прежнему конфликт
+    with pytest.raises(Exception) as exc:
+        operations.create_intent(
+            db, guild_id=GUILD, actor=_actor(), kind="bot.timeout.set",
+            arguments={"userId": "1", "mute": True, "seconds": 900, "deadlineAt": second.isoformat()},
+            idempotency_key="k-r26dl", identity={"userId": "1", "mute": True, "seconds": 900},
+        )
+    assert getattr(exc.value, "status_code", None) == 409

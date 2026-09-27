@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from api import auth as auth_module
 from api import audit_sync
 from api import bot as bot_module
-from api import discord_api, mutations
+from api import discord_api, mutations, operations
 from api.config import WebConfig
 from api.main import create_app
 from fakes import FakeDB
@@ -400,7 +400,10 @@ def test_message_multipart_with_files(files_calls: list[dict]) -> None:
     assert last["files"] == [("a.txt", b"data", "text/plain")]
     audit = client.app.state.db[mutations.COLL_AUDIT].docs[0]
     assert audit["action"] == "bot.message"
-    assert audit["after"]["attachments"] == [{"name": "a.txt", "size": 4}]
+    # R26-03.3: в audit-аргументах файлы — имя/размер плюс sha256 содержимого (digest, не bytes)
+    assert audit["after"]["attachments"] == [
+        {"name": "a.txt", "size": 4, "sha256": operations.file_digest(b"data")}
+    ]
     assert audit["after"]["length"] == 5
     assert audit["after"]["content"] == "hello"  # полный текст сообщения в журнале сайта
 

@@ -492,6 +492,11 @@ button:disabled {
   color: var(--red);
 }
 
+/* R26-03.6: «исход не подтверждён» — не успех и не отказ, отдельное состояние */
+.send-results .warn {
+  color: var(--yellow, #d4a017);
+}
+
 .tabs {
   display: flex;
   gap: 0.3rem;

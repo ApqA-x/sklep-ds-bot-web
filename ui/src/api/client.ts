@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { childKey } from "./intents";
 import type {
   ActiveSession,
   AuditPage,
@@ -80,6 +81,10 @@ export interface BotOperationResult {
   operationId?: string;
   state?: string;
   replayed?: boolean;
+  // R26-03.4: детерминированный результат (message.id / invite.code …) — одинаков
+  // на первом успехе и на replay
+  result?: { discordStatus?: number; discordResourceId?: string; inviteCode?: string; inviteUrl?: string } | null;
+  error?: unknown;
 }
 
 export function newOperationKey(): string {
@@ -383,7 +388,12 @@ export const api = {
     embed: EmbedSpec | null = null,
     operation?: OperationOpts,
   ) => {
-    const opts: OperationOpts = { key: operation?.key ?? newOperationKey(), batchId: operation?.batchId };
+    // R26-03.7: key намерения создаётся ДО fetch; в батче child-ключ стабилен
+    // (batchId+канал), поэтому повтор батча попадает в те же операции журнала.
+    const opts: OperationOpts = {
+      key: operation?.key ?? (operation?.batchId ? childKey(operation.batchId, channelId) : newOperationKey()),
+      batchId: operation?.batchId,
+    };
     if (files.length === 0 && embed === null)
       return apiSend<BotOperationResult>(
         "POST",
@@ -415,13 +425,32 @@ export const api = {
     ),
 
   botOperation: (guildId: string, operationId: string) =>
-    apiGet<BotOperationResult>(`/api/guild/${guildId}/bot/operations/${operationId}`),
+    apiGet<BotOperationStatus>(`/api/guild/${guildId}/bot/operations/${operationId}`),
 
   botBatch: (guildId: string, batchId: string) =>
-    apiGet<{ batchId: string; complete: boolean; pending: number; operations: BotOperationResult[] }>(
-      `/api/guild/${guildId}/bot/operations?batchId=${encodeURIComponent(batchId)}`,
-    ),
+    apiGet<{
+      batchId: string;
+      complete: boolean;
+      pending: number;
+      allSucceeded: boolean;
+      operations: BotOperationStatus[];
+    }>(`/api/guild/${guildId}/bot/operations?batchId=${encodeURIComponent(batchId)}`),
 };
+
+// R26-03.5/7: форма ответа status/batch (operations.public_view) — state/result/error
+// нужны экрану для сверки после потерянного ответа.
+export interface BotOperationStatus {
+  operationId: string;
+  kind: string;
+  state: "requested" | "executing" | "succeeded" | "failed" | "unknown";
+  attempts: number;
+  batchId: string | null;
+  createdAt: string | null;
+  finishedAt: string | null;
+  result: BotOperationResult["result"];
+  error: unknown;
+  audited: boolean;
+}
 
 export function useCanWrite(guildId: string | undefined): boolean {
   const whoami = useQuery({ queryKey: ["whoami"], queryFn: api.whoami });

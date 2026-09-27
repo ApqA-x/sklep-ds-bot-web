@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "node --test 'src/**/*.test.ts'"
+    "test": "node scripts/run-node-tests.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.62.0",

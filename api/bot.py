@@ -4,6 +4,7 @@ import asyncio
 import json
 import re
 import time
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -167,16 +168,27 @@ async def _check_role(request: Request, guild_id: str, role_id: str) -> None:
 
 
 async def _check_invite(request: Request, guild_id: str, code: str) -> None:
-    """Invite guild_id must match; unknown ownership → deny (T04.2)."""
+    """Принадлежность invite проверяется по официальному Invite object (R26-05):
+
+    Discord GET /invites/{code} возвращает гильдию во вложенном поле ``guild`` —
+    верхнеуровневого ``guild_id`` у этого ответа нет (его чтение отклоняло легитимное
+    удаление своего invite как 403). Fail-closed: любая неоднозначность — отказ.
+    """
     got = await _meta_get(request, f"/invites/{code}")
     if got is None:
         return
     status, payload = got
     if status == 404:
         raise HTTPException(status_code=404, detail="invite not found")
+    # 401/403/429/5xx и неразбираемый ответ — отказ, никогда не пропускаем молча
     if status >= 400 or not isinstance(payload, dict):
         raise HTTPException(status_code=502, detail=f"invite lookup failed: {status}")
-    if str(payload.get("guild_id") or "") != guild_id:
+    guild = payload.get("guild")
+    if not isinstance(guild, dict):
+        # group DM (guild нет) или неожиданная форма — принадлежность недоказуема
+        raise HTTPException(status_code=403, detail="invite guild cannot be verified")
+    gid = str(guild.get("id") or "")
+    if not gid or gid != guild_id:
         raise HTTPException(status_code=403, detail="invite belongs to another guild")
 
 
@@ -284,6 +296,7 @@ async def _action(
     run: Any,
     *,
     identity: dict[str, Any] | None = None,
+    preflight: Callable[[], Awaitable[None]] | None = None,
 ) -> dict:
     """T08: устойчивый intent → атомарный claim → внешний эффект → финал.
 
@@ -295,6 +308,11 @@ async def _action(
     локальной копии вызова — retry/takeover повторяют исходный намеренный payload
     (в том числе исходный абсолютный дедлайн timeout.set). `identity` — канонический
     запрос для requestHash, когда часть args выводима из момента записи.
+
+    R26-05: `preflight` — scope-проверка (GET метаданных), выполняемая только для
+    не-терминальных документов: после переиспользования намерения и до claim.
+    Replay уже завершённой операции не должен дёргать Discord — там «ресурс уже
+    исчез» является ожидаемым следствием прошлого успеха.
     """
     db = request.app.state.db
     if db is None:
@@ -326,6 +344,13 @@ async def _action(
             saved = doc.get("error") or {}
             raise HTTPException(status_code=502, detail={**saved, "operationId": op_id, "replayed": True})
         raise HTTPException(status_code=504, detail={"error": "outcome_unproven", **replayed})
+    if preflight is not None:
+        # R26-05: scope-проверка после устойчивого intent и только для не-терминального
+        # документа. Отказ preflight не требует правки журнала: документ остаётся в
+        # state=requested — внешнего эффекта не было, намерение уже устойчиво; повтор
+        # тем же Idempotency-Key переиспользует его (claim принимает requested), а
+        # новый ключ даст новый intent.
+        await preflight()
     claimed_pair = await asyncio.to_thread(operations.claim, db, op_id)
     if claimed_pair is None:
         raise HTTPException(status_code=409, detail={"error": "operation_in_progress", "operationId": op_id})
@@ -621,13 +646,17 @@ async def delete_invite(request: Request, guildId: str, code: str) -> dict:
     _snowflake(guildId, "guildId")
     if not INVITE_CODE_RE.match(code):
         raise HTTPException(status_code=422, detail="invalid invite code")
-    await _check_invite(request, guildId, code)
+    # R26-05: scope-проверка — preflight внутри _action (после intent, до claim), а не
+    # до журнала: повтор уже отработавшего удаления не должен падать на 404 в GET /invites.
+    # Код invite стабилен между retry: requestHash-проверка create_intent даёт 409 при
+    # другом code под тем же ключом, поэтому effect и preflight читают code из URL-пути.
     return await _action(
         request,
         "bot.invite.delete",
         "invite.delete",
         {"code": code},
         lambda _args: _call(request, "DELETE", f"/invites/{code}"),
+        preflight=lambda: _check_invite(request, guildId, code),
     )
 
 

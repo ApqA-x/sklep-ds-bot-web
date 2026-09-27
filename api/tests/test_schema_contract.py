@@ -6,7 +6,7 @@ import pytest
 
 from api import queries, schema_contract
 
-MANIFEST_CHECKSUM = "fc126fa18013c90a7a2ac5a3f062c206202fe7e966d1e7fd144e8b2fa91613c4"
+MANIFEST_CHECKSUM = "78ef34355cf7acecc6b07129729b20c872f16ef4062f3843089b4e1322aaec24"
 
 
 def test_manifest_copy_checksum_matches_bot_source_of_truth() -> None:
@@ -79,9 +79,16 @@ def test_verify_accepts_equivalent_alias_and_flags_mismatch() -> None:
     state_spec = next(s for s in manifest["indexes"] if s["name"] == "discord_audit_state_guildId_unique")
     # T11 (M4): состояние синхронизации аудита — unique(guildId), инвариант H08
     assert state_spec["owner"] == "runner" and state_spec["unique"] is True
+    # R26-01 (M5): индексы курсорного sweep'а журнала событий
+    sweep_by_name = {s["name"]: s for s in manifest["indexes"] if s["owner"] == "runner"}
+    el_spec = sweep_by_name["event_log_subject_createdAt_id"]
+    ei_spec = sweep_by_name["event_inbox_consumer_state_createdAt"]
+
     def runner_db(ttl_doc: dict) -> dict[str, list[dict]]:
         return {"operations": [ttl_doc], "discord_audit_logs": [_actual_doc(uniq_spec)],
-                "discord_audit_state": [_actual_doc(state_spec)]}
+                "discord_audit_state": [_actual_doc(state_spec)],
+                "event_log": [_actual_doc(el_spec)],
+                "event_inbox": [_actual_doc(ei_spec)]}
 
     report = schema_contract.verify_web_schema(Db(runner_db(_actual_doc(ttl_spec))), owners=("runner",))
     assert report["ok"]

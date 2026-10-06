@@ -333,7 +333,8 @@ def test_user_profile_none_for_unknown_and_full_for_known() -> None:
     assert profile_all["invitedCount"] == 2
 
 
-def test_invites_overview_sections_and_cache() -> None:
+def test_invites_overview_sections_and_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(queries, "_utc_now", lambda: _dt(10))
     db = FakeDB()
     db[queries.COLL_JOIN_ATTRIBUTIONS] = FakeCollection(queries.COLL_JOIN_ATTRIBUTIONS,
         docs=[{"guildId": "1", "userId": "u", "joinedAt": _dt(4), "inviteCode": "inv",

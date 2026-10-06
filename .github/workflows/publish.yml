@@ -155,8 +155,12 @@ jobs:
           DIGEST=$(docker buildx imagetools inspect "$IMAGE_LC:ci-$SHA" \
             --format '{{json .Manifest.Digest}}' | tr -d '"')
           echo "inspected $IMAGE_LC@$DIGEST"
-          REVISION=$(docker buildx imagetools inspect -o - "$IMAGE_LC@$DIGEST" | jq -r \
-            '.manifests[0].annotations["org.opencontainers.image.revision"] // .annotations["org.opencontainers.image.revision"] // empty')
+          # build-push-action writes OCI labels to each platform image config.
+          # `imagetools inspect -o` is not a supported buildx flag, and the
+          # index manifest does not carry this revision annotation.
+          REVISION=$(docker buildx imagetools inspect "$IMAGE_LC@$DIGEST" \
+            --format '{{json .}}' | jq -r \
+            '.image["linux/amd64"].config.Labels["org.opencontainers.image.revision"] // empty')
           if [ "$REVISION" != "$SHA" ]; then
             echo "OCI revision '$REVISION' != SHA кандидата '$SHA' — смоук не того образа"
             exit 1

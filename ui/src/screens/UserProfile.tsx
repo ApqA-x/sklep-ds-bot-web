@@ -101,12 +101,19 @@ export default function UserProfile() {
         <div
           className="profile-banner"
           style={c?.bannerUrl ? { backgroundImage: `url(${c.bannerUrl})` } : undefined}
-        />
-        <div className="profile-body">
+        >
           {c && (
-            <img className="profile-avatar" src={c.avatarUrl} alt="" width={88} height={88} referrerPolicy="no-referrer" />
+            <img
+              className="profile-avatar"
+              src={c.avatarUrl}
+              alt={`Аватар ${displayName}`}
+              width={88}
+              height={88}
+              referrerPolicy="no-referrer"
+            />
           )}
-          <div className="profile-meta">
+        </div>
+        <div className="profile-body">
           <h2 style={c?.accentColor ? { color: accentHex(c.accentColor) ?? undefined } : undefined}>{displayName}</h2>
           {(c?.avatars.length ?? 0) > 0 && (
             <div className="avatar-history" title="История аватарок (копится с момента запуска фичи)">
@@ -123,7 +130,6 @@ export default function UserProfile() {
               ))}
             </div>
           )}
-          </div>
         </div>
       </div>
       <Section title="Информация">

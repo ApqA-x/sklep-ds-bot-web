@@ -792,7 +792,7 @@ pre.inline {
   text-decoration: underline;
 }
 
-/* шапка профиля: банер отдельной полосой, инфо — под ним */
+/* шапка профиля: аватар на полном баннере, имя и история — ниже */
 .profile-card {
   margin-bottom: 1rem;
   border: 1px solid var(--border);
@@ -801,36 +801,37 @@ pre.inline {
   overflow: hidden;
 }
 .profile-banner {
-  height: 96px;
+  height: clamp(180px, 18vw, 240px);
+  display: flex;
+  align-items: center;
+  padding: 1rem;
   background-color: var(--surface0);
   background-size: cover;
   background-position: center;
 }
 .profile-body {
   display: flex;
-  gap: 1rem;
-  align-items: flex-start;
-  padding: 0 1rem 1rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: center;
+  min-height: 64px;
+  padding: 0.6rem 1rem;
 }
 .profile-card .profile-avatar {
   border-radius: 50%;
   border: 3px solid var(--bg);
   background: var(--bg);
   flex: none;
-  margin-top: -44px;
+  object-fit: cover;
 }
-.profile-meta {
-  min-width: 0;
-  padding-top: 8px;
-}
-.profile-meta h2 {
-  margin: 0 0 2px;
+.profile-body h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 .avatar-history {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-top: 6px;
 }
 .avatar-history img {
   width: 44px;

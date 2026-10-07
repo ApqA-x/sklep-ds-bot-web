@@ -47,6 +47,12 @@ function errorFrom(status: number, statusText: string, body: unknown): ApiError 
     if (payload && payload.detail !== undefined) {
       structured = payload.detail;
       detail = typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
+      if (status === 504 && typeof payload.detail === "object" && payload.detail !== null) {
+        const failure = payload.detail as { operationId?: unknown };
+        if (typeof failure.operationId === "string") {
+          detail = `Результат действия не подтверждён. Операция ${failure.operationId}. Проверьте её статус перед повтором.`;
+        }
+      }
     }
   } catch {
     /* not JSON */

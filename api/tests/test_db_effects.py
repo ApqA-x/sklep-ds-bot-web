@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api import operations, queries
@@ -163,3 +164,81 @@ def test_status_endpoint_reprojects() -> None:
     rows = db[COLL_AUDIT].docs
     assert len(rows) == 1 and rows[0]["operationId"] == op["_id"]
     assert _revision(db) == 1  # перепроекция не повторила мутацию
+
+
+def test_lost_finish_fence_after_settings_cas_is_not_reported_as_saved(monkeypatch) -> None:
+    db = _settings_db()
+    real_finish = operations.finish
+
+    def lose_fence(db_arg, op_id, claimed, state, **kwargs):
+        db_arg[operations.COLL_OPERATIONS].update_one({"_id": op_id}, {"$inc": {"fenceVersion": 1}})
+        return real_finish(db_arg, op_id, claimed, state, **kwargs)
+
+    monkeypatch.setattr(operations, "finish", lose_fence)
+    client = _dev_client(db)
+    response = _patch(client, 0, summaryChannelId=CHANNEL)
+
+    assert response.status_code == 504
+    detail = response.json()["detail"]
+    assert detail["error"] == "ownership_lost"
+    assert detail["state"] == "executing"
+    assert detail["operationId"] == _ops_of_kind(db, "db.settings.patch")[0]["_id"]
+    assert _revision(db) == 1  # эффект мог примениться, повторять его нельзя
+    assert db[COLL_AUDIT].docs == []  # старый worker не проецирует чужой финал
+    status = client.get(f"/api/guild/{GUILD}/bot/operations/{detail['operationId']}")
+    assert status.status_code == 200
+    assert status.json()["state"] == "executing"
+
+
+def test_lost_finish_fence_after_revision_conflict_is_not_reported_as_conflict(monkeypatch) -> None:
+    db = _settings_db(revision=5)
+    monkeypatch.setattr(operations, "finish", lambda *_args, **_kwargs: False)
+
+    response = _patch(_dev_client(db), 0, summaryChannelId=CHANNEL)
+
+    assert response.status_code == 504
+    assert response.json()["detail"]["error"] == "ownership_lost"
+    assert response.json()["detail"]["operationId"] == _ops_of_kind(db, "db.settings.patch")[0]["_id"]
+    assert _revision(db) == 5
+
+
+def test_effect_exception_returns_unknown_with_operation_id() -> None:
+    from api import mutations
+
+    db = _settings_db()
+
+    def partial_effect():
+        db[queries.COLL_GUILD_SETTINGS].update_one({"_id": GUILD}, {"$inc": {"revision": 1}})
+        raise RuntimeError("injected failure after effect")
+
+    with pytest.raises(Exception) as caught:
+        mutations._journal_effect(
+            db,
+            guild_id=GUILD,
+            actor={"userId": USER, "userName": "tester"},
+            kind="db.settings.patch",
+            arguments={"expectedRevision": 0, "auditAction": "settings.patch"},
+            effect=partial_effect,
+        )
+
+    assert getattr(caught.value, "status_code", None) == 504
+    assert caught.value.detail["error"] == "outcome_unproven"
+    assert caught.value.detail["state"] == "unknown"
+    assert caught.value.detail["operationId"] == _ops_of_kind(db, "db.settings.patch")[0]["_id"]
+    assert _revision(db) == 1
+
+
+def test_finish_exception_after_effect_returns_operation_id(monkeypatch) -> None:
+    db = _settings_db()
+
+    def unavailable_finish(*_args, **_kwargs):
+        raise RuntimeError("journal temporarily unavailable")
+
+    monkeypatch.setattr(operations, "finish", unavailable_finish)
+    response = _patch(_dev_client(db), 0, summaryChannelId=CHANNEL)
+
+    assert response.status_code == 504
+    assert response.json()["detail"]["error"] == "journal_unavailable_after_effect"
+    assert response.json()["detail"]["operationId"] == _ops_of_kind(db, "db.settings.patch")[0]["_id"]
+    assert _revision(db) == 1
+    assert db[COLL_AUDIT].docs == []

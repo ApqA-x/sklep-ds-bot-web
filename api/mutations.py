@@ -78,6 +78,38 @@ def record_audit(
 # мутации.
 
 
+def _finish_local_operation(
+    db: Any, op_id: str, claimed: dict[str, Any], state: str, **kwargs: Any
+) -> None:
+    """A local effect is not confirmed until its journal fence wins.
+
+    A lost fence or unavailable journal cannot prove whether the DB effect was
+    applied. Keep the operation id in the response so the caller can inspect
+    its durable state without replaying the effect.
+    """
+    try:
+        won = operations.finish(db, op_id, claimed, state, **kwargs)
+    except Exception as exc:  # noqa: BLE001 — the effect may already have been applied
+        raise HTTPException(
+            status_code=504,
+            detail={"error": "journal_unavailable_after_effect", "operationId": op_id, "state": "unknown"},
+        ) from exc
+    if won:
+        return
+    try:
+        current = operations.read_current(db, op_id)
+    except Exception:  # noqa: BLE001 — preserve the operation id even if the read also fails
+        current = None
+    raise HTTPException(
+        status_code=504,
+        detail={
+            "error": "ownership_lost",
+            "operationId": op_id,
+            "state": current.get("state") if current else None,
+        },
+    )
+
+
 def _journal_effect(
     db: Any,
     *,
@@ -107,12 +139,15 @@ def _journal_effect(
     try:
         status, before, after = effect()
     except Exception as exc:  # noqa: BLE001 — эффект мог примениться наполовине: только unknown
-        operations.finish(db, op_id, claimed, "unknown", error={"classification": "effect_exception"})
-        raise exc
+        _finish_local_operation(db, op_id, claimed, "unknown", error={"classification": "effect_exception"})
+        raise HTTPException(
+            status_code=504,
+            detail={"error": "outcome_unproven", "operationId": op_id, "state": "unknown"},
+        ) from exc
     if status == "conflict":
-        operations.finish(db, op_id, claimed, "failed", error={"classification": "revision_conflict"})
+        _finish_local_operation(db, op_id, claimed, "failed", error={"classification": "revision_conflict"})
         return status, op_id
-    operations.finish(
+    _finish_local_operation(
         db,
         op_id,
         claimed,

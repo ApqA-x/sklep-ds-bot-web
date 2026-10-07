@@ -235,13 +235,20 @@ def project_operation_audit(db: Any, doc: dict[str, Any]) -> bool:
         db[COLL_AUDIT].insert_one(entry)
     except Exception as exc:  # noqa: BLE001
         if not operations._is_duplicate(exc):
-            operations.mark_audit_error(db, doc["_id"])
+            try:
+                operations.mark_audit_error(db, doc["_id"])
+            except Exception:  # noqa: BLE001 — terminal CAS already left a pending marker
+                pass
             return False
         # уже спроецировано — дубль по детерминированному _id это успех
-    db[operations.COLL_OPERATIONS].update_one(
-        {"_id": doc["_id"], "auditError": True},
-        {"$set": {"auditError": False, "updatedAt": _utc_now()}},
-    )
+    try:
+        operations.mark_audit_complete(db, doc["_id"])
+    except Exception:  # noqa: BLE001 — duplicate-safe recovery will retry the pending marker
+        try:
+            operations.mark_audit_error(db, doc["_id"])
+        except Exception:  # noqa: BLE001 — the terminal CAS still retains pending state
+            pass
+        return False
     return True
 
 
@@ -249,10 +256,19 @@ def reproject_pending_audits(db: Any, *, guild_id: str | None = None, limit: int
     """Bounded-восстановление пропущенных audit-проекций (R26-04). Повтор мутаций
     не выполняет — только перепроецирует уже терминальные записи журнала; дубли
     отсекает детерминированный _id."""
-    where: dict[str, Any] = {"auditError": True, "state": {"$in": list(operations.TERMINAL)}}
+    # Legacy terminal docs had no auditState and could falsely report audited
+    # after a crash. Include them until each is idempotently projected.
+    where: dict[str, Any] = {
+        "state": {"$in": list(operations.TERMINAL)},
+        "$or": [
+            {"auditState": {"$in": ["pending", "error"]}},
+            {"auditState": {"$exists": False}, "kind": {"$regex": "^bot\\."}},
+            {"auditState": {"$exists": False}, "kind": {"$regex": "^db\\."}, "state": "succeeded"},
+        ],
+    }
     if guild_id:
         where["guildId"] = guild_id
-    docs = list(db[operations.COLL_OPERATIONS].find(where, limit=limit))
+    docs = list(db[operations.COLL_OPERATIONS].find(where, sort=[("updatedAt", 1)], limit=limit))
     recovered = sum(1 for doc in docs if project_operation_audit(db, doc))
     return {"considered": len(docs), "recovered": recovered, "remaining": len(docs) - recovered}
 

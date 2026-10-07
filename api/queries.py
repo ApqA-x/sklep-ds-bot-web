@@ -954,6 +954,7 @@ WEB_INDEXES: list[tuple[str, list[tuple[str, int]], str]] = [
     # T08: выборка журнала операций по гильдии (batch-статусы); дедуп-область — в самом _id
     ("operations", [("guildId", 1), ("batchId", 1)], "web_operations_guildId_batchId"),
     ("operations", [("guildId", 1), ("createdAt", -1)], "web_operations_guildId_createdAt"),
+    ("operations", [("auditState", 1), ("updatedAt", 1)], "web_operations_auditState_updatedAt"),
 ]
 
 

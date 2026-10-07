@@ -76,7 +76,7 @@ export function ChatBoard({ guildId, period, q }: { guildId: string; period: Per
         </Section>
       )}
       <Section title={`Лидерборд по сообщениям · за период «${PERIOD_LABELS[period]}» · всего авторов: ${total}`}>
-        <div className="toolbar">
+        <div className="toolbar leaderboard-pager">
           <span className="muted tiny">
             {total === 0
               ? q
@@ -84,14 +84,13 @@ export function ChatBoard({ guildId, period, q }: { guildId: string; period: Per
                 : "нет сообщений за период"
               : `стр. ${page} из ${pages}: с ${rankOffset + 1} по ${rankOffset + items.length}`}
           </span>
-          <span style={{ flex: 1 }} />
-          <Button icon="pi pi-arrow-left" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} />
-          <span>
-            {page} / {pages}
+          <span className="pager-controls">
+            <Button icon="pi pi-arrow-left" aria-label="предыдущая страница" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} />
+            <span>{page} / {pages}</span>
+            <Button icon="pi pi-arrow-right" aria-label="следующая страница" disabled={page >= pages} onClick={() => setPage((p) => p + 1)} />
           </span>
-          <Button icon="pi pi-arrow-right" disabled={page >= pages} onClick={() => setPage((p) => p + 1)} />
         </div>
-        <table>
+        <table className="responsive-board">
           <thead>
             <tr>
               <th>#</th>
@@ -104,15 +103,15 @@ export function ChatBoard({ guildId, period, q }: { guildId: string; period: Per
           <tbody>
             {items.map((item, index) => (
               <tr key={item.userId}>
-                <td>{rankOffset + index + 1}</td>
-                <td>
+                <td><span className="mobile-label">Место</span>{rankOffset + index + 1}</td>
+                <td><span className="mobile-label">Пользователь</span>
                   <Link to={`/g/${guildId}/users/${item.userId}`}>
                     {displayUserName(names.data, item.userId, item.userName)}
                   </Link>
                 </td>
-                <td>{item.messages}</td>
-                <td>{item.channels}</td>
-                <td>{fmtDate(item.lastMessageAt)}</td>
+                <td><span className="mobile-label">Сообщений</span>{item.messages}</td>
+                <td><span className="mobile-label">Каналов</span>{item.channels}</td>
+                <td><span className="mobile-label">Последнее</span>{fmtDate(item.lastMessageAt)}</td>
               </tr>
             ))}
           </tbody>

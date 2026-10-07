@@ -72,3 +72,21 @@ test("имя сервера заменяет сохранённый старый
   await expect(page.getByRole("row", { name: /Новый ник/ }).first()).toBeVisible();
   await expect(page.getByRole("row", { name: /bob/ }).first()).toBeVisible();
 });
+
+for (const width of [320, 390, 768]) {
+  test(`лидерборд помещается в мобильный viewport ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await mockApi(page, { authenticated: true, guildId: "77777" });
+    await page.goto("/g/77777/leaderboard");
+    await expect(page.getByRole("row", { name: /alice/ }).first()).toBeVisible();
+    const overflow = await page.evaluate(() => ({
+      delta: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      offenders: [...document.querySelectorAll("body *")]
+        .filter((element) => element.getBoundingClientRect().right > innerWidth + 1)
+        .slice(0, 8)
+        .map((element) => ({ tag: element.tagName, className: element.className, right: element.getBoundingClientRect().right })),
+    }));
+    expect(overflow.delta, JSON.stringify(overflow.offenders)).toBeLessThanOrEqual(1);
+    await expect(page.getByRole("button", { name: "следующая страница" })).toBeVisible();
+  });
+}

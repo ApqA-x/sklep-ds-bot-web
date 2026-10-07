@@ -136,7 +136,7 @@ function VoiceBoard({ guildId, period, q }: { guildId: string; period: Period; q
         </Section>
       )}
       <Section title={`Лидерборд · за период «${PERIOD_LABELS[period]}» · всего участников: ${total}`}>
-        <div className="toolbar">
+        <div className="toolbar leaderboard-pager">
           <span className="muted tiny">
             {total === 0
               ? q
@@ -144,14 +144,13 @@ function VoiceBoard({ guildId, period, q }: { guildId: string; period: Period; q
                 : "нет данных за период"
               : `стр. ${page} из ${pages}: с ${rankOffset + 1} по ${rankOffset + items.length}`}
           </span>
-          <span style={{ flex: 1 }} />
-          <Button icon="pi pi-arrow-left" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} />
-          <span>
-            {page} / {pages}
+          <span className="pager-controls">
+            <Button icon="pi pi-arrow-left" aria-label="предыдущая страница" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} />
+            <span>{page} / {pages}</span>
+            <Button icon="pi pi-arrow-right" aria-label="следующая страница" disabled={page >= pages} onClick={() => setPage((p) => p + 1)} />
           </span>
-          <Button icon="pi pi-arrow-right" disabled={page >= pages} onClick={() => setPage((p) => p + 1)} />
         </div>
-        <table>
+        <table className="responsive-board">
           <thead>
             <tr>
               <th>#</th>
@@ -163,14 +162,14 @@ function VoiceBoard({ guildId, period, q }: { guildId: string; period: Period; q
           <tbody>
             {items.map((item, index) => (
               <tr key={item.userId}>
-                <td>{rankOffset + index + 1}</td>
-                <td>
+                <td><span className="mobile-label">Место</span>{rankOffset + index + 1}</td>
+                <td><span className="mobile-label">Пользователь</span>
                   <Link to={`/g/${guildId}/users/${item.userId}`}>
                     {displayUserName(names.data, item.userId, item.userName)}
                   </Link>
                 </td>
-                <td>{fmtDuration(item.totalMs)}</td>
-                <td>{item.appearances}</td>
+                <td><span className="mobile-label">Время</span>{fmtDuration(item.totalMs)}</td>
+                <td><span className="mobile-label">Заходов</span>{item.appearances}</td>
               </tr>
             ))}
           </tbody>

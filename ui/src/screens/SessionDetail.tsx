@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 import { ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDate, fmtDuration } from "../lib/format";
-import { nameOf, useNames } from "../names";
+import { displayUserName, nameOf, useNames } from "../names";
 
 export default function SessionDetail() {
   const { guildId = "", sessionId = "" } = useParams();
@@ -45,7 +45,7 @@ export default function SessionDetail() {
             {s.participants.map((p) => (
               <tr key={`${p.userId}-${p.joinedAt}`}>
                 <td>
-                  <Link to={`/g/${guildId}/users/${p.userId}`}>{p.userName}</Link>
+                  <Link to={`/g/${guildId}/users/${p.userId}`}>{displayUserName(names.data, p.userId, p.userName)}</Link>
                 </td>
                 <td>{fmtDate(p.joinedAt)}</td>
                 <td>{p.active ? "в канале" : fmtDate(p.leftAt)}</td>

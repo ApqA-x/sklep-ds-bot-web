@@ -19,6 +19,7 @@ def _clear_caches() -> None:
     queries._leaderboard_cache.clear()
     queries._invites_cache.clear()
     queries._chat_leaderboard_cache.clear()
+    queries._names_cache.clear()
     queries._user_colors_cache.clear()
 
 
@@ -389,6 +390,36 @@ def test_known_user_colors_picks_top_colored_role() -> None:
     colors2 = queries.known_user_colors(db, "1", {})
     assert colors2 == colors
     assert len(db[queries.COLL_ROLE_STATE].calls) == 1
+
+
+def test_known_user_names_uses_bounded_guild_scoped_chat_archive() -> None:
+    db = FakeDB()
+    db[queries.COLL_CHAT] = FakeCollection(queries.COLL_CHAT, docs=[
+        {"guildId": "1", "sentAt": _dt(4), "authorUserId": "u1", "authorName": "u1"},
+        {"guildId": "1", "sentAt": _dt(3), "authorUserId": "u1", "authorName": "Имя из архива"},
+        {"guildId": "1", "sentAt": _dt(2), "authorUserId": "u2", "authorName": "Только чат"},
+        {"guildId": "2", "sentAt": _dt(5), "authorUserId": "u2", "authorName": "Чужой сервер"},
+    ])
+    db[queries.COLL_PARTICIPANTS] = FakeCollection(queries.COLL_PARTICIPANTS, docs=[
+        {"guildId": "1", "joinedAt": datetime(2026, 1, 1, tzinfo=timezone.utc),
+         "userId": "u3", "userName": "Старый голос"},
+        {"guildId": "2", "joinedAt": datetime(2026, 1, 2, tzinfo=timezone.utc),
+         "userId": "u3", "userName": "Чужой голос"},
+    ])
+    db[queries.COLL_NICKNAME_STATE] = FakeCollection(queries.COLL_NICKNAME_STATE, docs=[
+        {"guildId": "1", "userId": "u1", "nickname": "Текущий ник"},
+        {"guildId": "2", "userId": "u2", "nickname": "Чужой ник"},
+    ])
+
+    assert queries.known_user_names(db, "1") == {
+        "u1": "Текущий ник", "u2": "Только чат", "u3": "Старый голос",
+    }
+    chat_call = db[queries.COLL_CHAT].calls[0]
+    assert chat_call[2] == {"guildId": "1"}
+    assert chat_call[3]["limit"] == queries.NAME_CHAT_HISTORY_SCAN_LIMIT
+    voice_call = db[queries.COLL_PARTICIPANTS].calls[0]
+    assert voice_call[2]["guildId"] == "1"
+    assert voice_call[3]["limit"] == queries.NAME_VOICE_HISTORY_SCAN_LIMIT
 
 
 def test_chat_presets_lists_guild_documents_sorted() -> None:

@@ -17,6 +17,7 @@ import { PERIOD_LABELS, type Period } from "../api/types";
 import { ChartControls, Grid, useGridPref } from "../components/charts";
 import { ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDuration, toHours } from "../lib/format";
+import { displayUserName, useNames } from "../names";
 import { ChatBoard } from "./ChatLeaderboard";
 import { InvitesBoard } from "./Invites";
 
@@ -75,6 +76,7 @@ export default function Leaderboard() {
 
 function VoiceBoard({ guildId, period, q }: { guildId: string; period: Period; q: string }) {
   const navigate = useNavigate();
+  const names = useNames(guildId);
   const [page, setPage] = useState(1);
   const [top, setTop] = useState(10);
   const [grid, setGrid] = useGridPref();
@@ -82,7 +84,7 @@ function VoiceBoard({ guildId, period, q }: { guildId: string; period: Period; q
   const query = useQuery({
     queryKey: ["leaderboard", guildId, period, PAGE_SIZE, page, q],
     queryFn: () => api.leaderboard(guildId, period, PAGE_SIZE, page, q),
-    placeholderData: (prev) => prev,
+    placeholderData: (prev, previousQuery) => previousQuery?.queryKey[1] === guildId ? prev : undefined,
   });
 
   if (query.isLoading) return <Loading />;
@@ -93,7 +95,7 @@ function VoiceBoard({ guildId, period, q }: { guildId: string; period: Period; q
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rankOffset = (page - 1) * PAGE_SIZE;
   const chart = items.slice(0, top).map((i) => ({
-    name: i.userName,
+    name: displayUserName(names.data, i.userId, i.userName),
     hours: toHours(i.totalMs),
     ms: i.totalMs,
     userId: i.userId,
@@ -163,7 +165,9 @@ function VoiceBoard({ guildId, period, q }: { guildId: string; period: Period; q
               <tr key={item.userId}>
                 <td>{rankOffset + index + 1}</td>
                 <td>
-                  <Link to={`/g/${guildId}/users/${item.userId}`}>{item.userName}</Link>
+                  <Link to={`/g/${guildId}/users/${item.userId}`}>
+                    {displayUserName(names.data, item.userId, item.userName)}
+                  </Link>
                 </td>
                 <td>{fmtDuration(item.totalMs)}</td>
                 <td>{item.appearances}</td>

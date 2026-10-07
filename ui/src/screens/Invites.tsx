@@ -14,12 +14,13 @@ import { PERIOD_LABELS, type Period } from "../api/types";
 import { ChartControls, Grid, useGridPref } from "../components/charts";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDate } from "../lib/format";
-import { DName } from "../names";
+import { DName, displayUserName, useNames } from "../names";
 
 const TOPS = [5, 10, 20];
 
 export function InvitesBoard({ guildId, period }: { guildId: string; period: Period }) {
   const navigate = useNavigate();
+  const names = useNames(guildId);
   const [top, setTop] = useState(10);
   const [grid, setGrid] = useGridPref();
   const query = useQuery({
@@ -32,7 +33,10 @@ export function InvitesBoard({ guildId, period }: { guildId: string; period: Per
 
   const data = query.data;
   if (!data) return null;
-  const chart = data.byInviter.slice(0, top);
+  const chart = data.byInviter.slice(0, top).map((item) => ({
+    ...item,
+    userName: displayUserName(names.data, item.userId, item.userName),
+  }));
 
   return (
     <>
@@ -87,7 +91,7 @@ export function InvitesBoard({ guildId, period }: { guildId: string; period: Per
                     </Link>
                   </td>
                   <td>{a.inviteCode ?? "—"}</td>
-                  <td>{a.inviterName ?? "—"}</td>
+                  <td>{a.inviterUserId ? <DName kind="user" id={a.inviterUserId} fallback={a.inviterName} /> : "—"}</td>
                   <td>{a.attributionStatus ?? "—"}</td>
                   <td>{a.source ?? "—"}</td>
                 </tr>
@@ -113,7 +117,7 @@ export function InvitesBoard({ guildId, period }: { guildId: string; period: Per
               <tr key={c.code}>
                 <td>{c.code}</td>
                 <td><DName kind="channel" id={c.channelId} /></td>
-                <td>{c.createdByName ?? "—"}</td>
+                <td>{c.createdByUserId ? <DName kind="user" id={c.createdByUserId} fallback={c.createdByName} /> : "—"}</td>
                 <td>{fmtDate(c.createdAt)}</td>
                 <td>{c.deletedAt ? fmtDate(c.deletedAt) : "активен"}</td>
                 <td>{fmtDate(c.lastSeenAt)}</td>

@@ -1,7 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 // Общий мок API-контракта (ответы соответствуют api/types.ts).
-async function mockApi(page: Page, opts: { authenticated: boolean }) {
+async function mockApi(page: Page, opts: { authenticated: boolean; users?: Record<string, string>; guildId?: string }) {
+  const guildId = opts.guildId ?? "77";
   await page.route("**/api/**", (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -11,7 +12,7 @@ async function mockApi(page: Page, opts: { authenticated: boolean }) {
       loginUrl: "/api/auth/login",
       user: opts.authenticated ? { userId: "u1", userName: "tester" } : undefined,
       access: opts.authenticated
-        ? [{ guildId: "77", canRead: true, canWrite: true }]
+        ? [{ guildId, canRead: true, canWrite: true }]
         : [],
     };
     const send = (json: unknown, status = 200) =>
@@ -24,14 +25,16 @@ async function mockApi(page: Page, opts: { authenticated: boolean }) {
     if (path === "/api/guilds")
       return send({
         guilds: opts.authenticated
-          ? [{ guildId: "77", name: "Test Guild", canRead: true, canWrite: true }]
+          ? [{ guildId, name: "Test Guild", canRead: true, canWrite: true }]
           : [],
       });
     if (path === "/api/healthz") return send({ ok: true });
     if (path === "/api/readyz") return send({ ok: true });
+    if (path.endsWith("/names"))
+      return send({ guildId, guildName: "Test Guild", channels: {}, roles: {}, users: opts.users ?? {}, userColors: {} });
     if (path.endsWith("/leaderboard"))
       return send({
-        guildId: "77",
+        guildId,
         period: "7d",
         limit: 50,
         page: 1,
@@ -60,5 +63,12 @@ test("лидерборд рендерит смоканные строки для
   await page.goto("/g/77/leaderboard");
   await expect(page.getByText("всего участников: 2")).toBeVisible();
   await expect(page.getByRole("row", { name: /alice/ }).first()).toBeVisible();
+  await expect(page.getByRole("row", { name: /bob/ }).first()).toBeVisible();
+});
+
+test("имя сервера заменяет сохранённый старый ник в лидерборде", async ({ page }) => {
+  await mockApi(page, { authenticated: true, guildId: "77777", users: { u1: "Новый ник" } });
+  await page.goto("/g/77777/leaderboard");
+  await expect(page.getByRole("row", { name: /Новый ник/ }).first()).toBeVisible();
   await expect(page.getByRole("row", { name: /bob/ }).first()).toBeVisible();
 });

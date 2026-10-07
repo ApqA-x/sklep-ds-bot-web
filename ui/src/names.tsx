@@ -39,8 +39,16 @@ export function nameOf(names: NamesPayload | undefined, kind: NameKind, id: stri
   return map[id] || id;
 }
 
-export function DName({ kind, id }: { kind: NameKind; id: string }) {
+export function displayUserName(names: NamesPayload | undefined, id: string, archivedName?: string | null): string {
+  for (const value of [names?.users[id], archivedName]) {
+    const name = value?.trim();
+    if (name && name !== id && name.toLowerCase() !== "unknown" && !/^\d{15,22}$/.test(name)) return name;
+  }
+  return id;
+}
+
+export function DName({ kind, id, fallback }: { kind: NameKind; id: string; fallback?: string | null }) {
   const { guildId = "" } = useParams();
   const names = useNames(guildId);
-  return <>{nameOf(names.data, kind, id)}</>;
+  return <>{kind === "user" ? displayUserName(names.data, id, fallback) : nameOf(names.data, kind, id)}</>;
 }

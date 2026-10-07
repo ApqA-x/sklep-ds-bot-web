@@ -118,8 +118,8 @@ def validate_config(cfg: WebConfig) -> None:
         )
     if not cfg.discord_token:
         missing.append("DISCORD_TOKEN")
-    if not cfg.web_public_url and not cfg.discord_redirect_uri:
-        missing.append("WEB_PUBLIC_URL (or DISCORD_REDIRECT_URI)")
+    if not cfg.web_public_url:
+        missing.append("WEB_PUBLIC_URL")
     if not cfg.guild_allowlist:
         missing.append("WEB_GUILD_ALLOWLIST")
     if missing:

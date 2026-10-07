@@ -4,8 +4,9 @@ import asyncio
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from starlette.responses import Response
 
@@ -228,11 +229,44 @@ def create_app(
             same_site="lax",
         )
 
+    @app.middleware("http")
+    async def browser_security(request: Request, call_next):
+        # A6: a session cookie is sufficient to authorize writes, so reject
+        # cross-origin or origin-less browser writes before they reach a route.
+        # The trusted origin comes from configuration, never Host/X-Forwarded-*.
+        if cfg.is_production and request.url.path.startswith("/api/") and request.method in {
+            "POST", "PATCH", "PUT", "DELETE",
+        } and request.cookies.get("session"):
+            public = urlsplit(cfg.web_public_url)
+            expected = f"{public.scheme}://{public.netloc}".lower()
+            origin = request.headers.get("origin", "")
+            if origin.lower() != expected:
+                response = JSONResponse({"detail": "request origin is not allowed"}, status_code=403)
+            else:
+                response = await call_next(request)
+        else:
+            response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Content-Security-Policy"] = "frame-ancestors 'none'"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        if cfg.is_production:
+            # Observe asset/style needs on the deployed UI before enforcing a
+            # broader CSP; frame embedding is safe to block immediately.
+            response.headers["Content-Security-Policy-Report-Only"] = (
+                "default-src 'self'; base-uri 'self'; object-src 'none'; form-action 'self'"
+            )
+        if cfg.web_public_url.startswith("https://"):
+            response.headers["Strict-Transport-Security"] = "max-age=31536000"
+        return response
+
     @app.get("/api/healthz")
     def healthz(request: Request) -> JSONResponse:
         # T12: liveness — «процесс жив и обслуживает запросы». Mongo-статус
         # остаётся в payload для совместимости, но на код ответа не влияет:
         # отвал зависимости не должен выглядеть как смерть процесса (R01).
+        if cfg.is_production:
+            return JSONResponse({"status": "ok"}, status_code=200)
         mongo = _mongo_ping(request.app)
         payload = {
             "status": "ok",
@@ -251,6 +285,8 @@ def create_app(
         # T12: readiness — «готов выполнять работу»: bounded Mongo ping, схема,
         # media mount, живые критичные фоновые циклы. 503 = не готов (R01/R02).
         ready, payload = readiness.evaluate(request.app)
+        if cfg.is_production:
+            return JSONResponse({"status": "ready" if ready else "not_ready"}, status_code=200 if ready else 503)
         payload.update({"service": "web", "version": VERSION, "env": cfg.app_env})
         return JSONResponse(payload, status_code=200 if ready else 503)
 
@@ -258,6 +294,21 @@ def create_app(
     from . import bot as bot_api
     from . import media as media_api
     from . import write as write_api
+
+    @app.get("/api/internal/diagnostics/{guildId}", dependencies=[Depends(auth_api.require_guild_admin)])
+    def internal_diagnostics(request: Request, guildId: str) -> dict:
+        # Detailed health is available only to an administrator of an allowed
+        # guild; the public probes expose a status code and a generic state.
+        ready, detail = readiness.evaluate(request.app)
+        return {
+            "guildId": guildId,
+            "ready": ready,
+            "readiness": detail,
+            "mongo": _mongo_ping(request.app),
+            "loop": loop_monitor.snapshot(),
+            "version": VERSION,
+            "env": cfg.app_env,
+        }
 
     app.include_router(auth_api.router)
     app.include_router(auth_api.guilds_router)

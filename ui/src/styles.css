@@ -2277,7 +2277,7 @@ button.danger:hover:not(:disabled) {
 
   .responsive-board .mobile-label {
     display: inline;
-    flex: 0 0 42%;
+    flex: 0 0 48%;
     text-align: left;
     color: var(--subtext0);
     font-weight: 600;

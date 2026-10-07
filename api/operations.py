@@ -67,6 +67,11 @@ KINDS: dict[str, dict[str, str]] = {
 TERMINAL = ("succeeded", "failed", "unknown")
 
 
+def requires_audit(kind: str, state: str) -> bool:
+    """Bot outcomes are auditable; local DB changes only after proven success."""
+    return kind.startswith("bot.") or (kind.startswith("db.") and state == "succeeded")
+
+
 def new_id() -> str:
     return uuid.uuid4().hex
 
@@ -159,6 +164,7 @@ def create_intent(
         "result": None,
         "error": None,
         "auditError": False,
+        "auditState": "not_started",
     }
     collection = db[COLL_OPERATIONS]
     try:
@@ -241,6 +247,7 @@ def finish(
     if state not in TERMINAL:
         raise ValueError(f"not a terminal state: {state}")
     now = _now()
+    audit_required = requires_audit(str(claimed.get("kind") or ""), state)
     update: dict[str, Any] = {
         "$set": {
             "state": state,
@@ -249,6 +256,9 @@ def finish(
             "leaseExpiresAt": None,
             "updatedAt": now,
             "finishedAt": now,
+            # The audit marker and terminal state must be one atomic CAS.
+            "auditState": "pending" if audit_required else "not_required",
+            "auditError": audit_required,
         }
     }
     update_filter = {
@@ -264,8 +274,16 @@ def finish(
 def mark_audit_error(db: Any, operation_id: str) -> None:
     """O08: факт операции устойчив; ошибка audit-проекции остаётся видимой меткой."""
     db[COLL_OPERATIONS].update_one(
-        {"_id": operation_id},
-        {"$set": {"auditError": True, "updatedAt": _now()}},
+        {"_id": operation_id, "state": {"$in": list(TERMINAL)}, "auditState": {"$ne": "complete"}},
+        {"$set": {"auditError": True, "auditState": "error", "updatedAt": _now()}},
+    )
+
+
+def mark_audit_complete(db: Any, operation_id: str) -> None:
+    """Only call after a durable audit insert or its deterministic duplicate."""
+    db[COLL_OPERATIONS].update_one(
+        {"_id": operation_id, "state": {"$in": list(TERMINAL)}},
+        {"$set": {"auditError": False, "auditState": "complete", "updatedAt": _now()}},
     )
 
 
@@ -353,6 +371,8 @@ def reconcile_stale(db: Any, doc: dict[str, Any]) -> dict[str, Any]:
                 "leaseExpiresAt": None,
                 "updatedAt": now,
                 "finishedAt": now,
+                "auditState": "pending" if requires_audit(str(doc.get("kind") or ""), "unknown") else "not_required",
+                "auditError": requires_audit(str(doc.get("kind") or ""), "unknown"),
             },
             "$inc": {"fenceVersion": 1},
         },
@@ -362,6 +382,8 @@ def reconcile_stale(db: Any, doc: dict[str, Any]) -> dict[str, Any]:
         doc["state"] = "unknown"
         doc["error"] = {"classification": "lease_expired_unproven"}
         doc["finishedAt"] = now
+        doc["auditState"] = "pending" if requires_audit(str(doc.get("kind") or ""), "unknown") else "not_required"
+        doc["auditError"] = doc["auditState"] == "pending"
     return doc
 
 
@@ -377,7 +399,12 @@ def public_view(doc: dict[str, Any]) -> dict[str, Any]:
         "finishedAt": doc.get("finishedAt"),
         "result": doc.get("result"),
         "error": doc.get("error"),
-        "audited": not doc.get("auditError", False),
+        "audited": (
+            doc.get("auditState") in {"complete", "not_required"}
+            if "auditState" in doc
+            else doc.get("state") in TERMINAL
+            and not requires_audit(str(doc.get("kind") or ""), str(doc.get("state") or ""))
+        ),
     }
 
 

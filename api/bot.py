@@ -254,8 +254,12 @@ def _audit(
             origin="web",  # инициатор — веб-интерфейс; Discord здесь только транспорт исполнения
             operation_id=op_id,
         )
+        operations.mark_audit_complete(db, op_id)
     except Exception:  # noqa: BLE001 — сбой проекции не должен превращать выполненный эффект в 500
-        operations.mark_audit_error(db, op_id)
+        try:
+            operations.mark_audit_error(db, op_id)
+        except Exception:  # noqa: BLE001 — terminal CAS already retained auditState=pending
+            pass
 
 
 async def _finish(
@@ -680,7 +684,7 @@ async def operation_status(request: Request, guildId: str, operationId: str) -> 
     if doc is None:
         raise HTTPException(status_code=404, detail="operation not found")
     doc = await asyncio.to_thread(operations.reconcile_stale, db, doc)
-    if doc.get("state") in operations.TERMINAL and doc.get("auditError"):
+    if doc.get("state") in operations.TERMINAL and not operations.public_view(doc)["audited"]:
         try:
             await asyncio.to_thread(mutations.project_operation_audit, db, doc)
             fresh = await asyncio.to_thread(operations.get_operation, db, guildId, operationId)

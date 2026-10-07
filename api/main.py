@@ -19,6 +19,7 @@ API_DIR = Path(__file__).resolve().parent
 UI_DIST = (API_DIR.parent / "ui" / "dist").resolve()
 
 VERSION = "0.2.0"
+AUDIT_RECOVERY_INTERVAL_S = 30
 
 
 def _clean(value: str | None) -> str:
@@ -124,6 +125,22 @@ def create_app(
                         log.warning("schema recheck failed", exc_info=True)
 
             supervisor.spawn("web-schema-recheck", schema_recheck)
+
+            async def audit_recovery() -> None:
+                from . import mutations
+
+                while True:
+                    # Keep recovery independent of a user opening an operation.
+                    # Bounded batches avoid replaying the DB effect or flooding Mongo.
+                    await asyncio.sleep(AUDIT_RECOVERY_INTERVAL_S)
+                    # An unexpected database failure must reach Supervisor so
+                    # repeated failures make /readyz unhealthy.
+                    outcome = await asyncio.to_thread(mutations.reproject_pending_audits, database)
+                    supervisor.beat("web-audit-recovery")
+                    if outcome["remaining"]:
+                        log.warning("audit recovery still has %s pending entries in batch", outcome["remaining"])
+
+            supervisor.spawn("web-audit-recovery", audit_recovery, critical=True)
             if cfg.discord_token:
                 from . import audit_sync
 

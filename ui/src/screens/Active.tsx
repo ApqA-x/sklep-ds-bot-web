@@ -6,7 +6,7 @@ import { api } from "../api/client";
 import type { SessionDetail as SessionDetailType } from "../api/types";
 import { Empty, ErrorBox, Loading } from "../components/ui";
 import { fmtClock, fmtDate, fmtDuration } from "../lib/format";
-import { DName, nameOf, useNames } from "../names";
+import { DName, displayUserName, useNames } from "../names";
 
 function useNow(intervalMs: number): number {
   const [now, setNow] = useState(() => Date.now());
@@ -86,7 +86,7 @@ function SessionExpanded({
           ) : (
             online.map(([userId, g]) => (
               <Link key={userId} to={`/g/${guildId}/users/${userId}`} className="online-user" title={userId}>
-                {g.userName || nameOf(names.data, "user", userId)}
+                {displayUserName(names.data, userId, g.userName)}
                 <span className="muted tiny">в канале {fmtClock(g.totalMs)}</span>
               </Link>
             ))
@@ -107,7 +107,7 @@ function SessionExpanded({
             <tr key={userId}>
               <td>
                 <Link to={`/g/${guildId}/users/${userId}`} title={userId}>
-                  {g.userName || nameOf(names.data, "user", userId)}
+                  {displayUserName(names.data, userId, g.userName)}
                 </Link>
               </td>
               <td>{g.visits}</td>
@@ -131,7 +131,7 @@ function SessionExpanded({
           <tbody>
             {s.participants.map((p) => (
               <tr key={`${p.userId}-${p.joinedAt}`}>
-                <td title={p.userId}>{p.userName}</td>
+                <td title={p.userId}>{displayUserName(names.data, p.userId, p.userName)}</td>
                 <td>{fmtDate(p.joinedAt)}</td>
                 <td>{p.active ? "в канале" : fmtDate(p.leftAt)}</td>
                 <td className={p.active ? "live-timer" : undefined}>
@@ -202,7 +202,9 @@ export default function Active() {
               {session.participants.map((p) => (
                 <tr key={p.userId}>
                   <td>
-                    <Link to={`/g/${guildId}/users/${p.userId}`}>{p.userName}</Link>
+                    <Link to={`/g/${guildId}/users/${p.userId}`}>
+                      <DName kind="user" id={p.userId} fallback={p.userName} />
+                    </Link>
                   </td>
                   <td>{fmtDate(p.joinedAt)}</td>
                   <td className="live-timer">{fmtClock(msSince(now, p.joinedAt))}</td>

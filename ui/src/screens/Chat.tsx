@@ -16,7 +16,7 @@ import { TargetUserPicker } from "../components/userSearch";
 import { DateField } from "../components/dateField";
 import { Empty, ErrorBox, Loading, Section } from "../components/ui";
 import { fmtBytes, fmtDate } from "../lib/format";
-import { nameOf, useNames, usePicker } from "../names";
+import { displayUserName, nameOf, useNames, usePicker } from "../names";
 
 const TYPE_FILTERS: { key: string; label: string }[] = [
   { key: "", label: "всё" },
@@ -1253,7 +1253,7 @@ export default function Chat() {
                         : undefined
                     }
                   >
-                    {nameOf(names.data, "user", m.authorUserId) || m.authorName || m.authorUserId}
+                    {displayUserName(names.data, m.authorUserId, m.authorName)}
                   </strong>
                   <span className="chat-main">
                     {filters.channelIds.length !== 1 && m.channelId && (

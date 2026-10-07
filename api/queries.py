@@ -29,6 +29,8 @@ PERIODS: dict[str, timedelta | None] = {
 ACTIVE_MEMBER_SEARCH_WINDOW = timedelta(days=90)
 MAX_INVITE_ROWS = 200
 MAX_PROFILE_NICKNAMES = 20
+NAME_CHAT_HISTORY_SCAN_LIMIT = 5000
+NAME_VOICE_HISTORY_SCAN_LIMIT = 5000
 
 
 def _utc_now() -> datetime:
@@ -638,12 +640,39 @@ _names_cache = TTLCache(ttl_seconds=300.0)
 
 
 def known_user_names(db: Any, guild_id: str) -> dict[str, str]:
-    """userId -> best known display name (current nickname, else last seen username)."""
+    """Guild-scoped display names from a bounded archive window and current nicknames."""
     cached = _names_cache.get(guild_id)
     if cached is not None:
         return cached
     names: dict[str, str] = {}
     cutoff = _utc_now() - ACTIVE_MEMBER_SEARCH_WINDOW
+    # Older sessions still need a name even when no recent voice event exists.
+    # The indexed sort and limit keep the archival fallback finite.
+    for row in db[COLL_PARTICIPANTS].find(
+        {"guildId": guild_id, "joinedAt": {"$lt": cutoff}},
+        projection={"userId": 1, "userName": 1},
+        sort=[("joinedAt", -1)],
+        limit=NAME_VOICE_HISTORY_SCAN_LIMIT,
+        **timeout_kwargs(),
+    ):
+        uid = str(row.get("userId") or "")
+        name = str(row.get("userName") or "").strip()
+        if uid not in names and _useful_user_name(name, uid):
+            names[uid] = name
+    # Chat-only users may never have a recent voice participant. Use the newest
+    # bounded slice supported by the (guildId, sentAt) index, retaining the
+    # archived authorName without rewriting any message documents.
+    for row in db[COLL_CHAT].find(
+        {"guildId": guild_id},
+        projection={"authorUserId": 1, "authorName": 1},
+        sort=[("sentAt", -1)],
+        limit=NAME_CHAT_HISTORY_SCAN_LIMIT,
+        **timeout_kwargs(),
+    ):
+        uid = str(row.get("authorUserId") or "")
+        name = str(row.get("authorName") or "").strip()
+        if uid not in names and _useful_user_name(name, uid):
+            names[uid] = name
     pipeline = [
         {"$match": {"guildId": guild_id, "joinedAt": {"$gte": cutoff}}},
         {"$sort": {"joinedAt": 1}},
@@ -651,16 +680,25 @@ def known_user_names(db: Any, guild_id: str) -> dict[str, str]:
     ]
     for row in db[COLL_PARTICIPANTS].aggregate(pipeline, **command_timeout_kwargs()):
         name = str(row.get("userName") or "")
-        if name:
-            names[str(row["_id"])] = name
+        uid = str(row.get("_id") or "")
+        if _useful_user_name(name, uid):
+            names[uid] = name
     for doc in db[COLL_NICKNAME_STATE].find(
         {"guildId": guild_id}, projection={"userId": 1, "nickname": 1}, **timeout_kwargs()
     ):
         nickname = str(doc.get("nickname") or "")
-        if nickname:
-            names[str(doc.get("userId"))] = nickname
+        uid = str(doc.get("userId") or "")
+        if _useful_user_name(nickname, uid):
+            names[uid] = nickname
     _names_cache.set(guild_id, names)
     return names
+
+
+def _useful_user_name(name: str, user_id: str) -> bool:
+    return bool(
+        user_id and name and name != user_id and name.casefold() != "unknown"
+        and not re.fullmatch(r"\d{15,22}", name)
+    )
 
 
 _user_colors_cache = TTLCache(ttl_seconds=300.0)

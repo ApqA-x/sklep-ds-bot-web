@@ -15,12 +15,14 @@ import { PERIOD_LABELS, type Period } from "../api/types";
 import { ChartControls, Grid, useGridPref } from "../components/charts";
 import { ErrorBox, Loading, Section } from "../components/ui";
 import { fmtDate } from "../lib/format";
+import { displayUserName, useNames } from "../names";
 
 const TOPS = [5, 10, 20, 50];
 const PAGE_SIZE = 50;
 
 export function ChatBoard({ guildId, period, q }: { guildId: string; period: Period; q: string }) {
   const navigate = useNavigate();
+  const names = useNames(guildId);
   const [page, setPage] = useState(1);
   const [top, setTop] = useState(10);
   const [grid, setGrid] = useGridPref();
@@ -28,7 +30,7 @@ export function ChatBoard({ guildId, period, q }: { guildId: string; period: Per
   const query = useQuery({
     queryKey: ["chat-leaderboard", guildId, period, PAGE_SIZE, page, q],
     queryFn: () => api.chatLeaderboard(guildId, period, PAGE_SIZE, page, q),
-    placeholderData: (prev) => prev,
+    placeholderData: (prev, previousQuery) => previousQuery?.queryKey[1] === guildId ? prev : undefined,
   });
 
   if (query.isLoading) return <Loading />;
@@ -39,7 +41,7 @@ export function ChatBoard({ guildId, period, q }: { guildId: string; period: Per
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const rankOffset = (page - 1) * PAGE_SIZE;
   const chart = items.slice(0, top).map((i) => ({
-    name: i.userName,
+    name: displayUserName(names.data, i.userId, i.userName),
     messages: i.messages,
     userId: i.userId,
   }));
@@ -104,7 +106,9 @@ export function ChatBoard({ guildId, period, q }: { guildId: string; period: Per
               <tr key={item.userId}>
                 <td>{rankOffset + index + 1}</td>
                 <td>
-                  <Link to={`/g/${guildId}/users/${item.userId}`}>{item.userName}</Link>
+                  <Link to={`/g/${guildId}/users/${item.userId}`}>
+                    {displayUserName(names.data, item.userId, item.userName)}
+                  </Link>
                 </td>
                 <td>{item.messages}</td>
                 <td>{item.channels}</td>

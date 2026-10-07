@@ -40,7 +40,7 @@ export default function Sessions() {
   const query = useQuery({
     queryKey: ["sessions", guildId, page],
     queryFn: () => api.sessionsHistory(guildId, page),
-    placeholderData: (prev) => prev,
+    placeholderData: (prev, previousQuery) => previousQuery?.queryKey[1] === guildId ? prev : undefined,
   });
 
   if (query.isLoading) return <Loading />;
@@ -80,7 +80,7 @@ export default function Sessions() {
                     s.participants.map((p, i) => (
                       <div className="online-user" key={`${p.userId}-${i}`}>
                         <Link to={`/g/${guildId}/users/${p.userId}`}>
-                          <DName kind="user" id={p.userId} />
+                          <DName kind="user" id={p.userId} fallback={p.userName} />
                         </Link>
                         <span className="muted tiny">
                           в канале {fmtClock(msSince(now, p.joinedAt))}

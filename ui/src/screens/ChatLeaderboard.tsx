@@ -76,7 +76,7 @@ export function ChatBoard({ guildId, period, q }: { guildId: string; period: Per
         </Section>
       )}
       <Section title={`Лидерборд по сообщениям · за период «${PERIOD_LABELS[period]}» · всего авторов: ${total}`}>
-        <div className="toolbar">
+        <div className="toolbar leaderboard-pager">
           <span className="muted tiny">
             {total === 0
               ? q
@@ -84,12 +84,11 @@ export function ChatBoard({ guildId, period, q }: { guildId: string; period: Per
                 : "нет сообщений за период"
               : `стр. ${page} из ${pages}: с ${rankOffset + 1} по ${rankOffset + items.length}`}
           </span>
-          <span style={{ flex: 1 }} />
-          <Button icon="pi pi-arrow-left" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} />
-          <span>
-            {page} / {pages}
+          <span className="pager-controls">
+            <Button icon="pi pi-arrow-left" aria-label="предыдущая страница" disabled={page <= 1} onClick={() => setPage((p) => p - 1)} />
+            <span>{page} / {pages}</span>
+            <Button icon="pi pi-arrow-right" aria-label="следующая страница" disabled={page >= pages} onClick={() => setPage((p) => p + 1)} />
           </span>
-          <Button icon="pi pi-arrow-right" disabled={page >= pages} onClick={() => setPage((p) => p + 1)} />
         </div>
         <table>
           <thead>

@@ -204,6 +204,14 @@ button:disabled {
   margin-left: auto;
 }
 
+.pager-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 /* панель отправки от бота на экране «Чат» */
 .send-panel {
   display: flex;
@@ -659,7 +667,7 @@ tr:hover td {
 
 .cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 380px), 1fr));
   gap: 0.9rem;
 }
 
@@ -967,7 +975,7 @@ pre.inline {
 
 .events-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr));
   gap: 0.35rem;
   margin-top: 0.4rem;
 }
@@ -2178,4 +2186,65 @@ button.danger:hover:not(:disabled) {
   width: 100%;
   justify-content: flex-start;
   text-align: left;
+}
+
+@media (max-width: 700px) {
+  .content {
+    min-width: 0;
+    padding: 0.75rem 0.75rem 2rem;
+  }
+
+  .topbar {
+    gap: 0.5rem;
+    padding: 0.6rem 0.75rem;
+  }
+
+  .nav {
+    order: 3;
+    width: 100%;
+    gap: 0.25rem 0.75rem;
+  }
+
+  .nav a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+
+  .guild-btn {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .toolbar {
+    flex-wrap: wrap;
+    min-width: 0;
+  }
+
+  .toolbar > .p-inputtext,
+  .toolbar > .chat-channel-select {
+    flex: 1 1 100%;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .p-selectbutton.chip-group {
+    max-width: 100%;
+  }
+
+  .leaderboard-pager > .muted {
+    flex: 1 1 100%;
+  }
+
+  .pager-controls .p-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .card,
+  .section {
+    min-width: 0;
+  }
 }

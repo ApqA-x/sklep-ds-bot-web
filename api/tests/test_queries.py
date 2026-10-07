@@ -89,6 +89,35 @@ def test_chat_leaderboard_pipeline_search_matches_user_name() -> None:
     assert search == [{"$match": {"userName": {"$regex": "юзер", "$options": "i"}}}]
 
 
+def test_leaderboard_search_includes_current_nicknames_in_same_guild() -> None:
+    db = FakeDB()
+    db[queries.COLL_NICKNAME_STATE] = FakeCollection(queries.COLL_NICKNAME_STATE, docs=[
+        {"guildId": "1", "userId": "u1", "nickname": "Новый ник", "updatedAt": _dt(9)},
+        {"guildId": "2", "userId": "u2", "nickname": "Новый чужой", "updatedAt": _dt(9)},
+        {"guildId": "1", "userId": "u3", "nickname": "Старое имя", "updatedAt": _dt(8)},
+    ])
+    db[queries.COLL_PARTICIPANTS] = FakeCollection(
+        queries.COLL_PARTICIPANTS, aggregate_results=[[{"page": [], "total": []}]],
+    )
+    db[queries.COLL_CHAT] = FakeCollection(
+        queries.COLL_CHAT, aggregate_results=[[{"page": [], "total": []}]],
+    )
+
+    queries.leaderboard(db, "1", "all", 50, q="новый")
+    voice_pipeline = db[queries.COLL_PARTICIPANTS].calls[0][2]
+    assert voice_pipeline[3] == {"$match": {"$or": [
+        {"userName": {"$regex": "новый", "$options": "i"}},
+        {"_id": {"$in": ["u1"]}},
+    ]}}
+    nickname_call = db[queries.COLL_NICKNAME_STATE].calls[0]
+    assert nickname_call[2] == {"guildId": "1"}
+    assert nickname_call[3]["limit"] == queries.NAME_SEARCH_SCAN_LIMIT
+
+    queries.chat_leaderboard(db, "1", "all", 50, q="новый")
+    chat_pipeline = db[queries.COLL_CHAT].calls[0][2]
+    assert chat_pipeline[4] == voice_pipeline[3]
+
+
 def test_invites_by_inviter_pipeline_requires_inviter() -> None:
     pipeline = queries.build_invites_by_inviter_pipeline("9", _dt(2), 50)
     match = pipeline[0]["$match"]

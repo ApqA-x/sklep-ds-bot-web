@@ -31,6 +31,7 @@ MAX_INVITE_ROWS = 200
 MAX_PROFILE_NICKNAMES = 20
 NAME_CHAT_HISTORY_SCAN_LIMIT = 5000
 NAME_VOICE_HISTORY_SCAN_LIMIT = 5000
+NAME_SEARCH_SCAN_LIMIT = 5000
 
 
 def _utc_now() -> datetime:
@@ -123,7 +124,8 @@ def parse_date_bound(value: str, *, end: bool) -> datetime | None:
 
 
 def build_leaderboard_pipeline(
-    guild_id: str, cutoff: datetime | None, limit: int, skip: int = 0, q: str = ""
+    guild_id: str, cutoff: datetime | None, limit: int, skip: int = 0, q: str = "",
+    nickname_ids: list[str] | None = None,
 ) -> list[dict]:
     match: dict[str, Any] = {"guildId": guild_id}
     if cutoff is not None:
@@ -141,7 +143,8 @@ def build_leaderboard_pipeline(
         },
     ]
     if q:
-        pipeline.append({"$match": {"userName": {"$regex": re.escape(q), "$options": "i"}}})
+        by_name = {"userName": {"$regex": re.escape(q), "$options": "i"}}
+        pipeline.append({"$match": {"$or": [by_name, {"_id": {"$in": nickname_ids}}]} if nickname_ids else by_name})
     pipeline.extend(
         [
             {"$sort": {"totalMs": -1}},
@@ -157,7 +160,8 @@ def build_leaderboard_pipeline(
 
 
 def build_chat_leaderboard_pipeline(
-    guild_id: str, cutoff: datetime | None, limit: int, skip: int = 0, q: str = ""
+    guild_id: str, cutoff: datetime | None, limit: int, skip: int = 0, q: str = "",
+    nickname_ids: list[str] | None = None,
 ) -> list[dict]:
     """Топ по числу сообщений. authorName берётся $last после сортировки по sentAt,
     то есть самое свежее имя автора — как в голосовом лидерборде."""
@@ -186,7 +190,8 @@ def build_chat_leaderboard_pipeline(
         },
     ]
     if q:
-        pipeline.append({"$match": {"userName": {"$regex": re.escape(q), "$options": "i"}}})
+        by_name = {"userName": {"$regex": re.escape(q), "$options": "i"}}
+        pipeline.append({"$match": {"$or": [by_name, {"_id": {"$in": nickname_ids}}]} if nickname_ids else by_name})
     pipeline.extend(
         [
             {"$sort": {"messages": -1}},
@@ -304,6 +309,22 @@ def build_member_search_pipeline(guild_id: str, query: str, limit: int) -> list[
 # --- executors (db is a pymongo Database or a test fake with the same surface) ---
 
 
+def _matching_nickname_ids(db: Any, guild_id: str, q: str) -> list[str]:
+    """Bounded guild-only scan for names newer than leaderboard archive rows."""
+    needle = q.casefold()
+    return [
+        str(doc["userId"])
+        for doc in db[COLL_NICKNAME_STATE].find(
+            {"guildId": guild_id},
+            projection={"userId": 1, "nickname": 1},
+            sort=[("updatedAt", -1)],
+            limit=NAME_SEARCH_SCAN_LIMIT,
+            **timeout_kwargs(),
+        )
+        if doc.get("userId") and needle in str(doc.get("nickname") or "").casefold()
+    ]
+
+
 def leaderboard(
     db: Any, guild_id: str, period: str, limit: int, page: int = 1, q: str = ""
 ) -> tuple[list[dict], int, bool]:
@@ -312,8 +333,9 @@ def leaderboard(
     cached = _leaderboard_cache.get(key)
     if cached is not None:
         return cached[0], cached[1], True
+    nickname_ids = _matching_nickname_ids(db, guild_id, q) if q else []
     rows = db[COLL_PARTICIPANTS].aggregate(
-        build_leaderboard_pipeline(guild_id, period_cutoff(period), limit, (page - 1) * limit, q),
+        build_leaderboard_pipeline(guild_id, period_cutoff(period), limit, (page - 1) * limit, q, nickname_ids),
         **command_timeout_kwargs(),
     )
     facet = next(iter(rows), None) or {}
@@ -340,8 +362,9 @@ def chat_leaderboard(
     cached = _chat_leaderboard_cache.get(key)
     if cached is not None:
         return cached[0], cached[1], True
+    nickname_ids = _matching_nickname_ids(db, guild_id, q) if q else []
     rows = db[COLL_CHAT].aggregate(
-        build_chat_leaderboard_pipeline(guild_id, period_cutoff(period), limit, (page - 1) * limit, q),
+        build_chat_leaderboard_pipeline(guild_id, period_cutoff(period), limit, (page - 1) * limit, q, nickname_ids),
         **command_timeout_kwargs(),
     )
     facet = next(iter(rows), None) or {}

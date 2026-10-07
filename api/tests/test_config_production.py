@@ -76,6 +76,11 @@ def test_missing_public_url_breaks_startup() -> None:
     assert "WEB_PUBLIC_URL" in str(err.value)
 
 
+def test_redirect_uri_alone_is_not_enough_for_production_origin_gate() -> None:
+    with pytest.raises(ConfigError, match="WEB_PUBLIC_URL"):
+        load_config(env=_production_env(WEB_PUBLIC_URL=""))
+
+
 def test_short_session_secret_breaks_startup() -> None:
     with pytest.raises(ConfigError) as err:
         load_config(env=_production_env(WEB_SESSION_SECRET="short"))

@@ -150,7 +150,7 @@ function VoiceBoard({ guildId, period, q }: { guildId: string; period: Period; q
             <Button icon="pi pi-arrow-right" aria-label="следующая страница" disabled={page >= pages} onClick={() => setPage((p) => p + 1)} />
           </span>
         </div>
-        <table>
+        <table className="responsive-board">
           <thead>
             <tr>
               <th>#</th>
@@ -162,14 +162,14 @@ function VoiceBoard({ guildId, period, q }: { guildId: string; period: Period; q
           <tbody>
             {items.map((item, index) => (
               <tr key={item.userId}>
-                <td>{rankOffset + index + 1}</td>
-                <td>
+                <td><span className="mobile-label">Место</span>{rankOffset + index + 1}</td>
+                <td><span className="mobile-label">Пользователь</span>
                   <Link to={`/g/${guildId}/users/${item.userId}`}>
                     {displayUserName(names.data, item.userId, item.userName)}
                   </Link>
                 </td>
-                <td>{fmtDuration(item.totalMs)}</td>
-                <td>{item.appearances}</td>
+                <td><span className="mobile-label">Время</span>{fmtDuration(item.totalMs)}</td>
+                <td><span className="mobile-label">Заходов</span>{item.appearances}</td>
               </tr>
             ))}
           </tbody>

@@ -212,6 +212,10 @@ button:disabled {
   white-space: nowrap;
 }
 
+.mobile-label {
+  display: none;
+}
+
 /* панель отправки от бота на экране «Чат» */
 .send-panel {
   display: flex;
@@ -2241,6 +2245,42 @@ button.danger:hover:not(:disabled) {
   .pager-controls .p-button {
     min-width: 44px;
     min-height: 44px;
+  }
+
+  .responsive-board,
+  .responsive-board tbody,
+  .responsive-board tr {
+    display: block;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .responsive-board thead {
+    display: none;
+  }
+
+  .responsive-board tr {
+    margin-bottom: 0.6rem;
+    padding: 0.4rem 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .responsive-board td {
+    display: flex;
+    justify-content: space-between;
+    gap: 0.6rem;
+    border: 0;
+    text-align: right;
+    overflow-wrap: anywhere;
+  }
+
+  .responsive-board .mobile-label {
+    display: inline;
+    flex: 0 0 42%;
+    text-align: left;
+    color: var(--subtext0);
+    font-weight: 600;
   }
 
   .card,

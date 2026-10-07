@@ -90,7 +90,7 @@ export function ChatBoard({ guildId, period, q }: { guildId: string; period: Per
             <Button icon="pi pi-arrow-right" aria-label="следующая страница" disabled={page >= pages} onClick={() => setPage((p) => p + 1)} />
           </span>
         </div>
-        <table>
+        <table className="responsive-board">
           <thead>
             <tr>
               <th>#</th>
@@ -103,15 +103,15 @@ export function ChatBoard({ guildId, period, q }: { guildId: string; period: Per
           <tbody>
             {items.map((item, index) => (
               <tr key={item.userId}>
-                <td>{rankOffset + index + 1}</td>
-                <td>
+                <td><span className="mobile-label">Место</span>{rankOffset + index + 1}</td>
+                <td><span className="mobile-label">Пользователь</span>
                   <Link to={`/g/${guildId}/users/${item.userId}`}>
                     {displayUserName(names.data, item.userId, item.userName)}
                   </Link>
                 </td>
-                <td>{item.messages}</td>
-                <td>{item.channels}</td>
-                <td>{fmtDate(item.lastMessageAt)}</td>
+                <td><span className="mobile-label">Сообщений</span>{item.messages}</td>
+                <td><span className="mobile-label">Каналов</span>{item.channels}</td>
+                <td><span className="mobile-label">Последнее</span>{fmtDate(item.lastMessageAt)}</td>
               </tr>
             ))}
           </tbody>

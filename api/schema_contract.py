@@ -23,7 +23,9 @@ def load_manifest() -> dict:
 
 
 def manifest_checksum() -> str:
-    return hashlib.sha256(MANIFEST_PATH.read_bytes()).hexdigest()
+    # Git may materialize the copied JSON with CRLF on Windows. The bot's
+    # canonical manifest_json() is LF, so hash that stable representation.
+    return hashlib.sha256(MANIFEST_PATH.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
 
 class SchemaIncompatible(RuntimeError):

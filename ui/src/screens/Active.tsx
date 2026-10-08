@@ -93,7 +93,7 @@ function SessionExpanded({
           )}
         </div>
       )}
-      <table>
+      <table className="responsive-board">
         <thead>
           <tr>
             <th>Участник</th>
@@ -106,20 +106,21 @@ function SessionExpanded({
           {rows.map(([userId, g]) => (
             <tr key={userId}>
               <td>
+                <span className="mobile-label">Участник</span>
                 <Link to={`/g/${guildId}/users/${userId}`} title={userId}>
                   {displayUserName(names.data, userId, g.userName)}
                 </Link>
               </td>
-              <td>{g.visits}</td>
-              <td>{fmtDuration(g.totalMs)}</td>
-              <td>{g.inChannel ? <span className="badge voice">в канале</span> : <span className="muted">вышел</span>}</td>
+              <td><span className="mobile-label">Заходов</span>{g.visits}</td>
+              <td><span className="mobile-label">Время за сессию</span>{fmtDuration(g.totalMs)}</td>
+              <td><span className="mobile-label">Сейчас</span>{g.inChannel ? <span className="badge voice">в канале</span> : <span className="muted">вышел</span>}</td>
             </tr>
           ))}
         </tbody>
       </table>
       <details className="intervals">
         <summary>Все заходы ({s.participants.length})</summary>
-        <table>
+        <table className="responsive-board">
           <thead>
             <tr>
               <th>Участник</th>
@@ -131,10 +132,11 @@ function SessionExpanded({
           <tbody>
             {s.participants.map((p) => (
               <tr key={`${p.userId}-${p.joinedAt}`}>
-                <td title={p.userId}>{displayUserName(names.data, p.userId, p.userName)}</td>
-                <td>{fmtDate(p.joinedAt)}</td>
-                <td>{p.active ? "в канале" : fmtDate(p.leftAt)}</td>
+                <td title={p.userId}><span className="mobile-label">Участник</span>{displayUserName(names.data, p.userId, p.userName)}</td>
+                <td><span className="mobile-label">Зашёл</span>{fmtDate(p.joinedAt)}</td>
+                <td><span className="mobile-label">Вышел</span>{p.active ? "в канале" : fmtDate(p.leftAt)}</td>
                 <td className={p.active ? "live-timer" : undefined}>
+                  <span className="mobile-label">Длительность</span>
                   {p.active ? fmtClock(intervalMs(p, now)) : fmtDuration(p.durationMs)}
                 </td>
               </tr>
@@ -190,7 +192,7 @@ export default function Active() {
               {session.id === openIds ? "скрыть подробности ▴" : "подробности ▾"}
             </Button>
           </div>
-          <table>
+          <table className="responsive-board">
             <thead>
               <tr>
                 <th>Участник</th>
@@ -202,12 +204,13 @@ export default function Active() {
               {session.participants.map((p) => (
                 <tr key={p.userId}>
                   <td>
+                    <span className="mobile-label">Участник</span>
                     <Link to={`/g/${guildId}/users/${p.userId}`}>
                       <DName kind="user" id={p.userId} fallback={p.userName} />
                     </Link>
                   </td>
-                  <td>{fmtDate(p.joinedAt)}</td>
-                  <td className="live-timer">{fmtClock(msSince(now, p.joinedAt))}</td>
+                  <td><span className="mobile-label">Зашёл</span>{fmtDate(p.joinedAt)}</td>
+                  <td className="live-timer"><span className="mobile-label">В сессии</span>{fmtClock(msSince(now, p.joinedAt))}</td>
                 </tr>
               ))}
             </tbody>

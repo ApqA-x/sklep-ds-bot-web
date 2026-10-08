@@ -105,7 +105,7 @@ export default function Sessions() {
         {items.length === 0 ? (
           <Empty>Закрытых сессий нет.</Empty>
         ) : (
-          <table>
+          <table className="responsive-board">
             <thead>
               <tr>
                 <th>Канал</th>
@@ -119,14 +119,15 @@ export default function Sessions() {
               {items.map((s) => (
                 <tr key={s.id}>
                   <td>
+                    <span className="mobile-label">Канал</span>
                     <Link to={`/g/${guildId}/sessions/${s.id}`}>
                       <DName kind="channel" id={s.channelId} />
                     </Link>
                   </td>
-                  <td>{fmtDate(s.startedAt)}</td>
-                  <td>{fmtDate(s.endedAt)}</td>
-                  <td>{s.endedByUserId ? <DName kind="user" id={s.endedByUserId} /> : "—"}</td>
-                  <td>{s.hasSummary ? "есть" : "—"}</td>
+                  <td><span className="mobile-label">Начало</span>{fmtDate(s.startedAt)}</td>
+                  <td><span className="mobile-label">Конец</span>{fmtDate(s.endedAt)}</td>
+                  <td><span className="mobile-label">Завершил</span>{s.endedByUserId ? <DName kind="user" id={s.endedByUserId} /> : "—"}</td>
+                  <td><span className="mobile-label">Саммари</span>{s.hasSummary ? "есть" : "—"}</td>
                 </tr>
               ))}
             </tbody>

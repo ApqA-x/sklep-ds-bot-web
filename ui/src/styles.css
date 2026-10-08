@@ -2368,6 +2368,14 @@ button.danger:hover:not(:disabled) {
     overflow-wrap: anywhere;
   }
 
+  .responsive-board td a,
+  .card-head > strong,
+  .online-user > a,
+  .online-session-head > a {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
   .responsive-board .mobile-label {
     display: inline;
     flex: 0 0 48%;

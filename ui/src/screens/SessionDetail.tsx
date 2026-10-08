@@ -32,7 +32,7 @@ export default function SessionDetail() {
         </dl>
       </Section>
       <Section title={`Участники (${s.participants.length})`}>
-        <table>
+        <table className="responsive-board">
           <thead>
             <tr>
               <th>Пользователь</th>
@@ -45,11 +45,12 @@ export default function SessionDetail() {
             {s.participants.map((p) => (
               <tr key={`${p.userId}-${p.joinedAt}`}>
                 <td>
+                  <span className="mobile-label">Пользователь</span>
                   <Link to={`/g/${guildId}/users/${p.userId}`}>{displayUserName(names.data, p.userId, p.userName)}</Link>
                 </td>
-                <td>{fmtDate(p.joinedAt)}</td>
-                <td>{p.active ? "в канале" : fmtDate(p.leftAt)}</td>
-                <td>{fmtDuration(p.durationMs)}</td>
+                <td><span className="mobile-label">Зашёл</span>{fmtDate(p.joinedAt)}</td>
+                <td><span className="mobile-label">Вышел</span>{p.active ? "в канале" : fmtDate(p.leftAt)}</td>
+                <td><span className="mobile-label">Время</span>{fmtDuration(p.durationMs)}</td>
               </tr>
             ))}
           </tbody>

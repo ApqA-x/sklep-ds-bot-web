@@ -92,6 +92,35 @@ for (const width of [320, 390, 768]) {
 }
 
 for (const width of [320, 390]) {
+  test(`мобильное меню доступно и закрывается на ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await mockApi(page, { authenticated: true });
+    await page.goto("/g/77/leaderboard");
+    const menu = page.getByRole("button", { name: "Разделы сервера" });
+    const nav = page.getByRole("navigation", { name: "Разделы сервера" });
+    await expect(menu).toHaveAttribute("aria-expanded", "false");
+    await expect(nav).toBeHidden();
+    await menu.click();
+    await expect(menu).toHaveAttribute("aria-expanded", "true");
+    await expect(nav.getByRole("link", { name: "Аудит" })).toBeVisible();
+    await expect(nav.getByRole("link", { name: "Настройки" })).toBeVisible();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(1);
+    await page.keyboard.press("Escape");
+    await expect(nav).toBeHidden();
+    await expect(menu).toBeFocused();
+    await menu.click();
+    await page.getByText("всего участников: 2").click();
+    await expect(nav).toBeHidden();
+    await expect(menu).toBeFocused();
+    await menu.click();
+    await nav.getByRole("link", { name: "Чат" }).click();
+    await expect(page).toHaveURL(/\/g\/77\/chat$/);
+    await expect(nav).toBeHidden();
+  });
+}
+
+for (const width of [320, 390]) {
   test(`таймер в профиле помещается в мобильный viewport ${width}px`, async ({ page }) => {
     const guildId = "77777";
     const userId = "111111111111111111";

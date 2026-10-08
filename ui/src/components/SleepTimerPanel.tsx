@@ -60,7 +60,7 @@ export function SleepTimerPanel({ guildId, initialUserId }: { guildId: string; i
         Выбери участника по нику или Discord ID. Срок считается от текущего времени;
         если к сроку человек вышел из войса и вернулся позднее, старый таймер его не отключит.
       </p>
-      <div className="action-row">
+      <div className="sleep-timer-picker">
         <TargetUserPicker
           guildId={guildId}
           placeholder="Ник или Discord ID"
@@ -78,7 +78,7 @@ export function SleepTimerPanel({ guildId, initialUserId }: { guildId: string; i
               {current?.resultAt ? <> · итог {fmtDate(current.resultAt)}</> : null}
             </p>
           )}
-          <div className="action-row">
+          <div className="sleep-timer-controls">
             <label htmlFor="sleep-hours">Через часов</label>
             <InputNumber
               inputId="sleep-hours"

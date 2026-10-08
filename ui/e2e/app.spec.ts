@@ -90,3 +90,60 @@ for (const width of [320, 390, 768]) {
     await expect(page.getByRole("button", { name: "следующая страница" })).toBeVisible();
   });
 }
+
+for (const width of [320, 390]) {
+  test(`таймер в профиле помещается в мобильный viewport ${width}px`, async ({ page }) => {
+    const guildId = "77777";
+    const userId = "111111111111111111";
+    await page.setViewportSize({ width, height: 800 });
+    await mockApi(page, { authenticated: true, guildId });
+    await page.route(`**/api/guild/${guildId}/**`, (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const send = (json: unknown) => route.fulfill({
+        status: 200, contentType: "application/json", body: JSON.stringify(json),
+      });
+      if (path === `/api/guild/${guildId}/users/${userId}`) return send({
+        guildId, userId, userName: "Спящий", period: "all", totalMs: 0,
+        appearances: 0, messageCount: 0, invitedCount: 0,
+        daily: [], dailyMessages: [], dailyInvites: [], roleIds: [], nicknames: [], join: null,
+      });
+      if (path === `/api/guild/${guildId}/users/${userId}/card`) return send({
+        guildId, userId, source: "discord", username: "sleeper", globalName: "Спящий",
+        nick: "Спящий", joinedAt: null, avatarUrl: "", bannerUrl: null,
+        accentColor: null, avatars: [],
+      });
+      if (path === `/api/guild/${guildId}/users/${userId}/member`) return send({
+        guildId, userId, source: "unavailable", roleIds: [], timeoutUntil: null, voiceChannelId: null,
+      });
+      if (path === `/api/guild/${guildId}/picker`) return send({
+        guildId, roles: [], voiceChannels: [], textChannels: [],
+      });
+      if (path === `/api/guild/${guildId}/sleep/member/${userId}`) return send({
+        guildId, userId, status: "pending", dueAt: "2026-10-08T23:00:00Z",
+        hours: 2, resultAt: null, reason: null,
+      });
+      return route.fallback();
+    });
+    await page.goto(`/g/${guildId}/users/${userId}`);
+    await expect(page.getByRole("heading", { name: "Автоотключение от голосового канала" })).toBeVisible();
+    await expect(page.getByText("ожидает срока")).toBeVisible();
+    const overflow = await page.evaluate(() => ({
+      delta: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      offenders: [...document.querySelectorAll("body *")]
+        .filter((element) => element.getBoundingClientRect().right > innerWidth + 1)
+        .slice(0, 8)
+        .map((element) => ({ tag: element.tagName, className: element.className })),
+    }));
+    expect(overflow.delta, JSON.stringify(overflow.offenders)).toBeLessThanOrEqual(1);
+    await expect(page.getByRole("button", { name: "Поставить или заменить" })).toBeVisible();
+    if (width === 320) {
+      await page.getByRole("button", { name: "сбросить фильтр по пользователю" }).click();
+      const search = page.getByPlaceholder("Ник или Discord ID");
+      await search.fill("12345");
+      await expect(search).toBeVisible();
+      await search.fill("222222222222222222");
+      await search.press("Enter");
+      await expect(page.locator('.sleep-timer-picker .chip[title="222222222222222222"]')).toBeVisible();
+    }
+  });
+}

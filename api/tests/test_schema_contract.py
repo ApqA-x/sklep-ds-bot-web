@@ -6,7 +6,7 @@ import pytest
 
 from api import queries, schema_contract
 
-MANIFEST_CHECKSUM = "c47b3302fef08aa847879bcb60f394642da1d8a38a2d9bfdc6a6858beb851c3f"
+MANIFEST_CHECKSUM = "1c5321d1b3093135ba20d09e35da0363c4adbca0d7c38e7439a9562abf1b1bd4"
 
 
 def test_manifest_copy_checksum_matches_bot_source_of_truth() -> None:

@@ -148,8 +148,14 @@ for (const width of [320, 390]) {
       return route.fallback();
     });
     const noPageOverflow = async () => {
-      const delta = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
-      expect(delta).toBeLessThanOrEqual(1);
+      const overflow = await page.evaluate(() => ({
+        delta: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        offenders: [...document.querySelectorAll("body *")]
+          .filter((element) => element.getBoundingClientRect().right > innerWidth + 1)
+          .slice(0, 8)
+          .map((element) => ({ tag: element.tagName, className: element.className, text: element.textContent?.slice(0, 60) })),
+      }));
+      expect(overflow.delta, JSON.stringify(overflow.offenders)).toBeLessThanOrEqual(1);
     };
     await page.goto("/g/77/active");
     await expect(page.getByRole("button", { name: /подробности/ })).toBeVisible();

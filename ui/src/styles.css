@@ -2376,6 +2376,15 @@ button.danger:hover:not(:disabled) {
     overflow-wrap: anywhere;
   }
 
+  .section h2,
+  .kv dd {
+    overflow-wrap: anywhere;
+  }
+
+  .kv {
+    grid-template-columns: max-content minmax(0, 1fr);
+  }
+
   .responsive-board .mobile-label {
     display: inline;
     flex: 0 0 48%;

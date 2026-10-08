@@ -38,6 +38,8 @@ def test_set_replay_status_and_cancel(monkeypatch) -> None:
     assert first.status_code == 200, first.text
     assert first.json()["status"] == "pending"
     assert first.json()["replayed"] is False
+    pending_events = client.app.state.db["voice_sleep_timers"].docs[0]["auditPending"]
+    assert len(pending_events) == 1 and pending_events[0]["reason"] == "set"
     due = first.json()["dueAt"]
     assert due
     repeated = client.post(PATH, json={"hours": 2}, headers=headers)
@@ -50,6 +52,7 @@ def test_set_replay_status_and_cancel(monkeypatch) -> None:
     assert cancelled.status_code == 200, cancelled.text
     assert cancelled.json()["hadActiveTimer"] is True
     assert cancelled.json()["status"] == "cancelled"
+    assert [e["reason"] for e in client.app.state.db["voice_sleep_timers"].docs[0]["auditPending"]] == ["set", "cancel"]
     old_replay = client.post(PATH, json={"hours": 2}, headers=headers)
     assert old_replay.status_code == 200
     assert old_replay.json()["replayed"] is True

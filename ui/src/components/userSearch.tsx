@@ -65,8 +65,6 @@ export function TargetUserPicker({
         const v = e.value as string | MemberHit | null;
         if (typeof v === "string") {
           setQuery(v);
-          const trimmed = v.trim();
-          if (/^\d{5,25}$/.test(trimmed)) onChange(trimmed);
         } else if (v && typeof v === "object") {
           const hit = v as MemberHit;
           onChange(hit.userId);
@@ -79,6 +77,15 @@ export function TargetUserPicker({
         onChange(hit.userId);
         setQuery("");
         setSuggestions([]);
+      }}
+      onKeyDown={(event) => {
+        const id = query.trim();
+        if (event.key === "Enter" && /^\d{5,20}$/.test(id)) {
+          event.preventDefault();
+          onChange(id);
+          setQuery("");
+          setSuggestions([]);
+        }
       }}
     />
   );

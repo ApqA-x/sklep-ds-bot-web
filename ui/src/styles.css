@@ -1070,6 +1070,49 @@ pre.inline {
   gap: 0.45rem;
 }
 
+.sleep-timer-picker,
+.sleep-timer-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.sleep-timer-picker .p-autocomplete,
+.sleep-timer-picker .p-inputtext,
+.sleep-timer-picker .chip {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.sleep-timer-picker .muted {
+  overflow-wrap: anywhere;
+}
+
+.sleep-timer-controls .p-inputnumber {
+  width: 7rem;
+  max-width: 100%;
+}
+
+.sleep-timer-controls .p-inputnumber-input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+@media (max-width: 700px) {
+  .sleep-timer-picker .p-autocomplete,
+  .sleep-timer-picker .p-inputtext {
+    width: 100% !important;
+  }
+
+  .sleep-timer-controls .p-button {
+    flex: 1 1 100%;
+    min-height: 44px;
+  }
+}
+
 .action.danger {
   border-left-color: var(--red);
 }

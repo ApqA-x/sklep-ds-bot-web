@@ -225,6 +225,14 @@ class FakeCollection:
         self.docs.append(dict(doc))
         return FakeUpdateResult(0, 0, upserted_id=doc.get("_id"))
 
+    def replace_one(self, flt: dict, replacement: dict, **kw):
+        self.calls.append(("replace_one", self.name, flt, replacement))
+        for index, doc in enumerate(self.docs):
+            if _matches(doc, flt):
+                self.docs[index] = dict(replacement)
+                return FakeUpdateResult(1, 1)
+        return FakeUpdateResult(0, 0)
+
     def delete_one(self, flt: dict, **kw):
         self.calls.append(("delete_one", self.name, flt))
         for index, doc in enumerate(self.docs):

@@ -21,6 +21,18 @@ export type LeaderboardItem = {
   appearances: number;
 };
 
+export type SleepTimer = {
+  guildId: string;
+  userId: string;
+  status: "none" | "pending" | "executing" | "disconnected" | "skipped" | "cancelled" | "unknown" | "failed";
+  dueAt: string | null;
+  hours: number | null;
+  resultAt: string | null;
+  reason: string | null;
+  replayed?: boolean;
+  hadActiveTimer?: boolean;
+};
+
 export type Leaderboard = {
   guildId: string;
   period: Period;

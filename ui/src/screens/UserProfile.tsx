@@ -16,6 +16,7 @@ import {
 import { api, useCanWrite } from "../api/client";
 import { PERIOD_LABELS, type Period } from "../api/types";
 import { Grid } from "../components/charts";
+import { SleepTimerPanel } from "../components/SleepTimerPanel";
 import { Empty, ErrorBox, Loading, OptionSelect, roleColorCss, Section, type PickerOption } from "../components/ui";
 import { discordUserUrl, fmtDate, fmtDayRu, fmtDuration } from "../lib/format";
 import { DName, useMemberState, usePicker } from "../names";
@@ -255,6 +256,9 @@ export default function UserProfile() {
           </div>
         )}
       </Section>
+      {canWrite && (
+        <SleepTimerPanel guildId={guildId} initialUserId={userId} />
+      )}
       {canWrite && (
         <ActionPanel
           guildId={guildId}

@@ -292,6 +292,7 @@ def create_app(
 
     from . import auth as auth_api
     from . import bot as bot_api
+    from . import sleep as sleep_api
     from . import media as media_api
     from . import write as write_api
 
@@ -315,6 +316,7 @@ def create_app(
     app.include_router(read_api.router)
     app.include_router(write_api.router)
     app.include_router(bot_api.router)
+    app.include_router(sleep_api.router)
     # T05: вместо публичного StaticFiles — авторизованная выдача вложений
     # (доказательство связи файла с гильдией через метаданные чата).
     app.include_router(media_api.guild_router)

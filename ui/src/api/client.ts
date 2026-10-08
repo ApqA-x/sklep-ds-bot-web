@@ -22,6 +22,7 @@ import type {
   PickerPayload,
   SessionDetail,
   SessionPage,
+  SleepTimer,
   StalkerSubscription,
   UserCard,
   UserProfile,
@@ -376,6 +377,21 @@ export const api = {
       `/api/guild/${guildId}/bot/member/${userId}/disconnect`,
       {},
       { key: newOperationKey() },
+    ),
+
+  sleepTimer: (guildId: string, userId: string) =>
+    apiGet<SleepTimer>(`/api/guild/${guildId}/sleep/member/${userId}`),
+
+  sleepSet: (guildId: string, userId: string, hours: number) =>
+    apiSend<SleepTimer>(
+      "POST", `/api/guild/${guildId}/sleep/member/${userId}`,
+      { hours }, { key: newOperationKey() },
+    ),
+
+  sleepCancel: (guildId: string, userId: string) =>
+    apiSend<SleepTimer>(
+      "DELETE", `/api/guild/${guildId}/sleep/member/${userId}`,
+      undefined, { key: newOperationKey() },
     ),
 
   botKick: (guildId: string, userId: string, reason: string) =>

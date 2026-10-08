@@ -121,6 +121,58 @@ for (const width of [320, 390]) {
 }
 
 for (const width of [320, 390]) {
+  test(`активные и архивные сессии читаются на ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await mockApi(page, { authenticated: true });
+    await page.route(/\/api\/guild\/77\/sessions(?:\/|\?|$)/, (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const userName = "Очень длинное имя участника без пробелов_12345678901234567890";
+      const startedAt = "2026-10-08T19:00:00Z";
+      const participant = { userId: "u1", userName, joinedAt: startedAt, durationMs: 3600000 };
+      const summary = {
+        id: "s1", channelId: "channel_12345678901234567890", startedAt,
+        endedAt: "2026-10-08T20:00:00Z", endedByUserId: "u1", hasSummary: true,
+      };
+      const send = (json: unknown) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(json) });
+      if (path.endsWith("/sessions/active")) return send({ guildId: "77", items: [{
+        id: "s1", channelId: summary.channelId, startedAt, participants: [participant],
+      }] });
+      if (path.endsWith("/sessions/s1")) return send({
+        ...summary, guildId: "77", status: "closed", updatedAt: summary.endedAt,
+        summaryMessage: "Итоги встречи", summaryGeneratedAt: summary.endedAt,
+        participants: [{ ...participant, leftAt: summary.endedAt, active: false }],
+      });
+      if (path.endsWith("/sessions")) return send({
+        guildId: "77", status: "closed", page: 1, size: 25, total: 1, items: [summary],
+      });
+      return route.fallback();
+    });
+    const noPageOverflow = async () => {
+      const overflow = await page.evaluate(() => ({
+        delta: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        offenders: [...document.querySelectorAll("body *")]
+          .filter((element) => element.getBoundingClientRect().right > innerWidth + 1)
+          .slice(0, 8)
+          .map((element) => ({ tag: element.tagName, className: element.className, text: element.textContent?.slice(0, 60) })),
+      }));
+      expect(overflow.delta, JSON.stringify(overflow.offenders)).toBeLessThanOrEqual(1);
+    };
+    await page.goto("/g/77/active");
+    await expect(page.getByRole("button", { name: /подробности/ })).toBeVisible();
+    await noPageOverflow();
+    await page.getByRole("button", { name: /подробности/ }).click();
+    await expect(page.locator(".card-details .responsive-board").first()).toBeVisible();
+    await noPageOverflow();
+    await page.goto("/g/77/sessions");
+    await expect(page.locator(".responsive-board td .mobile-label", { hasText: "Саммари" })).toBeVisible();
+    await noPageOverflow();
+    await page.goto("/g/77/sessions/s1");
+    await expect(page.locator(".responsive-board td .mobile-label", { hasText: "Время" })).toBeVisible();
+    await noPageOverflow();
+  });
+}
+
+for (const width of [320, 390]) {
   test(`таймер в профиле помещается в мобильный viewport ${width}px`, async ({ page }) => {
     const guildId = "77777";
     const userId = "111111111111111111";

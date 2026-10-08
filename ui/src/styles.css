@@ -94,6 +94,15 @@ a:hover {
   border-bottom: 2px solid var(--mauve);
 }
 
+.topbar-spacer {
+  flex: 1;
+}
+
+.mobile-menu-toggle,
+.mobile-current-section {
+  display: none;
+}
+
 .guild-btn {
   flex: none;
 }
@@ -2246,16 +2255,57 @@ button.danger:hover:not(:disabled) {
     padding: 0.6rem 0.75rem;
   }
 
+  .topbar-spacer {
+    display: none;
+  }
+
+  .mobile-menu-toggle {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    order: 2;
+  }
+
+  .mobile-current-section {
+    display: block;
+    min-width: 0;
+    flex: 1;
+    order: 1;
+    overflow-wrap: anywhere;
+  }
+
   .nav {
-    order: 3;
+    display: none;
+    order: 5;
     width: 100%;
-    gap: 0.25rem 0.75rem;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .nav.nav-open {
+    display: flex;
   }
 
   .nav a {
     display: inline-flex;
     align-items: center;
     min-height: 44px;
+    padding: 0.5rem 0.75rem;
+  }
+
+  .guild-btn {
+    order: 3;
+  }
+
+  .user-chip {
+    order: 4;
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .user-chip a {
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .guild-btn {

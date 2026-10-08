@@ -1326,7 +1326,47 @@ button.danger:hover:not(:disabled) {
 
 @media (max-width: 700px) {
   .chat-message {
-    grid-template-columns: 1fr auto;
+    min-width: 0;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .chat-time {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .chat-flags {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .chat-author,
+  .chat-main {
+    min-width: 0;
+    grid-column: 1 / -1;
+  }
+
+  .chat-author {
+    grid-row: 2;
+  }
+
+  .chat-main {
+    grid-row: 3;
+  }
+
+  .chat-attachment {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+  }
+
+  .chat-image,
+  .chat-video {
+    max-width: 100%;
+  }
+
+  .chat-video {
+    width: 100%;
   }
 }
 

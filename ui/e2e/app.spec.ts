@@ -173,6 +173,54 @@ for (const width of [320, 390]) {
 }
 
 for (const width of [320, 390]) {
+  test(`чат с длинным текстом и медиа помещается на ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 800 });
+    await mockApi(page, { authenticated: true });
+    await page.route(/\/api\/guild\/77\/chat(?:\/|\?|$)/, (route) => {
+      const path = new URL(route.request().url()).pathname;
+      const send = (json: unknown) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(json) });
+      if (path.endsWith("/chat/channels")) return send({ guildId: "77", items: [
+        { channelId: "c1", count: 1, lastAt: "2026-10-08T19:00:00Z" },
+      ] });
+      if (path.endsWith("/chat")) return send({
+        guildId: "77", channelId: "c1", hasMore: false, sort: "desc", nextCursor: null,
+        items: [{
+          messageId: "m1", channelId: "c1", authorUserId: "u2",
+          authorName: "ОченьДлинноеИмяБезПробелов_123456789012345678901234567890",
+          content: "НепрерывныйТекстСообщения_123456789012345678901234567890",
+          sentAt: "2026-10-08T19:00:00Z", editedAt: "2026-10-08T19:05:00Z",
+          deletedAt: "2026-10-08T19:10:00Z",
+          attachments: [
+            { id: "a1", filename: "очень-длинное-имя-файла_123456789012345678901234567890.txt", kind: "file", contentType: "text/plain", size: 42, path: "", stored: false, url: "data:text/plain,hello" },
+            { id: "a2", filename: "image.png", kind: "image", contentType: "image/png", size: 42, path: "", stored: false, url: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='600' height='300'/%3E" },
+            { id: "a3", filename: "clip.mp4", kind: "video", contentType: "video/mp4", size: 42, path: "", stored: false, url: "data:video/mp4;base64," },
+          ],
+        }],
+      });
+      return route.fallback();
+    });
+    await page.goto("/g/77/chat");
+    await expect(page.locator(".chat-message")).toBeVisible();
+    await expect(page.locator(".chat-image")).toBeVisible();
+    await expect(page.locator(".chat-video")).toBeVisible();
+    await expect(page.getByRole("button", { name: /Фильтры/ })).toBeVisible();
+    const overflow = await page.evaluate(() => ({
+      delta: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      feedDelta: (() => {
+        const feed = document.querySelector(".chat-list");
+        return feed ? feed.scrollWidth - feed.clientWidth : -1;
+      })(),
+      offenders: [...document.querySelectorAll("body *")]
+        .filter((element) => element.getBoundingClientRect().right > innerWidth + 1)
+        .slice(0, 8)
+        .map((element) => ({ tag: element.tagName, className: element.className })),
+    }));
+    expect(overflow.delta, JSON.stringify(overflow.offenders)).toBeLessThanOrEqual(1);
+    expect(overflow.feedDelta, JSON.stringify(overflow.offenders)).toBeLessThanOrEqual(1);
+  });
+}
+
+for (const width of [320, 390]) {
   test(`таймер в профиле помещается в мобильный viewport ${width}px`, async ({ page }) => {
     const guildId = "77777";
     const userId = "111111111111111111";

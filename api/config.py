@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from os import environ
 from typing import Any
 
@@ -50,6 +50,11 @@ class WebConfig:
     # Empty in development/test means "no restriction"; in production it is a
     # startup error (see validate_config).
     guild_allowlist: frozenset[str] = frozenset()
+    # Archived guilds remain readable through the old, offline bot account.
+    # They are never writable through the dashboard.
+    archive_guild_allowlist: frozenset[str] = frozenset()
+    archive_discord_token: str = ""
+    archive_discord_application_id: str = ""
     media_dir: str = ""
     log_level: str = "INFO"
     # T16: бюджет одного Mongo-запроса (maxTimeMS) и порог свободного места под
@@ -79,12 +84,24 @@ class WebConfig:
         # validated to always carry a non-empty one.
         return not self.guild_allowlist or guild_id in self.guild_allowlist
 
+    def guild_archived(self, guild_id: str) -> bool:
+        return guild_id in self.archive_guild_allowlist
 
-def _parse_allowlist(raw: str) -> frozenset[str]:
+    def for_guild(self, guild_id: str) -> WebConfig:
+        if not self.guild_archived(guild_id):
+            return self
+        return replace(
+            self,
+            discord_token=self.archive_discord_token,
+            discord_application_id=self.archive_discord_application_id,
+        )
+
+
+def _parse_allowlist(raw: str, key: str = "WEB_GUILD_ALLOWLIST") -> frozenset[str]:
     ids = {part.strip() for part in raw.replace(",", " ").split() if part.strip()}
     bad = {item for item in ids if not item.isdigit() or not 5 <= len(item) <= 25}
     if bad:
-        raise ConfigError("WEB_GUILD_ALLOWLIST must contain Discord guild snowflakes")
+        raise ConfigError(f"{key} must contain Discord guild snowflakes")
     return frozenset(ids)
 
 
@@ -101,6 +118,16 @@ def validate_config(cfg: WebConfig) -> None:
     redirect_issue = _origin_mismatch(cfg)
     if redirect_issue is not None:
         raise ConfigError(redirect_issue)
+
+    if cfg.archive_guild_allowlist:
+        if not cfg.archive_guild_allowlist <= cfg.guild_allowlist:
+            raise ConfigError("WEB_ARCHIVE_GUILD_ALLOWLIST must be a subset of WEB_GUILD_ALLOWLIST")
+        if not cfg.archive_discord_token or not cfg.archive_discord_application_id:
+            raise ConfigError("WEB_ARCHIVE_GUILD_ALLOWLIST requires WEB_ARCHIVE_DISCORD_TOKEN and WEB_ARCHIVE_DISCORD_APPLICATION_ID")
+        if not cfg.archive_discord_application_id.isdigit():
+            raise ConfigError("WEB_ARCHIVE_DISCORD_APPLICATION_ID must be a Discord application ID")
+        if cfg.archive_discord_token == cfg.discord_token:
+            raise ConfigError("WEB_ARCHIVE_DISCORD_TOKEN must differ from DISCORD_TOKEN")
 
     if not cfg.is_production:
         return
@@ -122,6 +149,8 @@ def validate_config(cfg: WebConfig) -> None:
         missing.append("WEB_PUBLIC_URL")
     if not cfg.guild_allowlist:
         missing.append("WEB_GUILD_ALLOWLIST")
+    elif cfg.guild_allowlist <= cfg.archive_guild_allowlist:
+        raise ConfigError("WEB_GUILD_ALLOWLIST must include at least one active guild")
     if missing:
         raise ConfigError("WEB_ENV=production requires: " + ", ".join(missing))
 
@@ -178,6 +207,11 @@ def load_config(env: Any = None, *, validate: bool = True) -> WebConfig:
         web_session_secret=_get(source, "WEB_SESSION_SECRET"),
         web_public_url=_get(source, "WEB_PUBLIC_URL"),
         guild_allowlist=_parse_allowlist(_get(source, "WEB_GUILD_ALLOWLIST")),
+        archive_guild_allowlist=_parse_allowlist(
+            _get(source, "WEB_ARCHIVE_GUILD_ALLOWLIST"), "WEB_ARCHIVE_GUILD_ALLOWLIST"
+        ),
+        archive_discord_token=_get(source, "WEB_ARCHIVE_DISCORD_TOKEN"),
+        archive_discord_application_id=_get(source, "WEB_ARCHIVE_DISCORD_APPLICATION_ID"),
         media_dir=_get(source, "MEDIA_DIR"),
         log_level=_get(source, "LOG_LEVEL", "INFO").upper(),
     )

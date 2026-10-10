@@ -20,6 +20,7 @@ export default function Layout() {
   const queryClient = useQueryClient();
   const whoami = useQuery({ queryKey: ["whoami"], queryFn: api.whoami });
   const me = whoami.data;
+  const archivedGuild = Boolean(guildId && me?.access.some((entry) => entry.guildId === guildId && entry.canRead && !entry.canWrite));
   const names = useNames(guildId);
   const sections = [
     ["leaderboard", "Лидерборд"],
@@ -123,6 +124,7 @@ export default function Layout() {
         )}
       </header>
       <main className="content">
+        {archivedGuild && <p className="hint" role="status">Архив сервера: данные доступны только для чтения. Новые события здесь не записываются.</p>}
         {/* T04.6: смена гильдии полностью перемонтирует экран — выбранные каналы,
             файлы, модалки и pending-операции предыдущей гильдии не переносятся */}
         <Outlet key={guildId} />

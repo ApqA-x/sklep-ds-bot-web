@@ -47,7 +47,7 @@ def _perm_cache_put(key: tuple[str, str], status: str, perms: int) -> None:
 async def _resolve_fresh(request: Request, guild_id: str, user_id: str) -> tuple[str, int]:
     """Allowed/denied within the TTL bound; never an older grant, never an allow
     on errors — unavailable raises 503 so the client can retry."""
-    cfg = _cfg(request)
+    cfg = _cfg(request).for_guild(guild_id)
     try:
         status, perms = await discord_api.resolve_permissions(cfg, guild_id, user_id)
     except discord_api.PermissionUnavailable as err:
@@ -94,6 +94,8 @@ async def require_guild_read(request: Request) -> None:
 
 async def require_guild_admin(request: Request) -> None:
     guild_id = request.path_params.get("guildId", "")
+    if _cfg(request).guild_archived(guild_id):
+        raise HTTPException(status_code=403, detail="archived guild is read-only")
     perms = await perms_for(request, guild_id)
     if not perms & ADMINISTRATOR:
         raise HTTPException(status_code=403, detail="administrator permission required")
@@ -203,13 +205,36 @@ async def auth_whoami(request: Request):
     }
 
 
+async def _panel_guilds(cfg: WebConfig) -> list[dict]:
+    """Active guilds plus explicitly configured archives, each from its own bot."""
+    result: list[dict] = []
+    try:
+        active = await discord_api.bot_guilds(cfg)
+    except discord_api.DiscordError as err:
+        log.warning("active bot guild list failed: %s", err)
+        active = []
+    result.extend(
+        guild for guild in active
+        if cfg.guild_allowed(str(guild.get("id") or ""))
+        and not cfg.guild_archived(str(guild.get("id") or ""))
+    )
+    if cfg.archive_guild_allowlist:
+        archive_cfg = cfg.for_guild(next(iter(cfg.archive_guild_allowlist)))
+        try:
+            archived = await discord_api.bot_guilds(archive_cfg)
+        except discord_api.DiscordError as err:
+            log.warning("archive bot guild list failed: %s", err)
+            archived = []
+        result.extend(
+            guild for guild in archived
+            if cfg.guild_archived(str(guild.get("id") or ""))
+        )
+    return result
+
+
 async def _accessible_guilds(request: Request, cfg: WebConfig, user_id: str) -> list[dict]:
     """Bot-visible guilds where the CURRENT resolver says the user is allowed."""
-    try:
-        bot_guilds = await discord_api.bot_guilds(cfg)
-    except discord_api.DiscordError as err:
-        log.warning("bot guild list failed: %s", err)
-        bot_guilds = []
+    bot_guilds = await _panel_guilds(cfg)
     out = []
     for guild in bot_guilds:
         gid = str(guild.get("id") or "")
@@ -231,7 +256,7 @@ async def _accessible_guilds(request: Request, cfg: WebConfig, user_id: str) -> 
                 "guildId": gid,
                 "name": str(guild.get("name") or gid),
                 "canRead": True,
-                "canWrite": True,
+                "canWrite": not cfg.guild_archived(gid),
             }
         )
     return out

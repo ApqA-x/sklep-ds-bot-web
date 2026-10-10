@@ -40,7 +40,9 @@ export default function Home() {
         <ul className="guild-list">
           {guilds.data.guilds.map((g) => (
             <li key={g.guildId}>
-              <Button onClick={() => choose(g.guildId)}>{g.name}</Button>
+              <Button onClick={() => choose(g.guildId)}>
+                {g.name}{!g.canWrite ? " · архив (только чтение)" : ""}
+              </Button>
             </li>
           ))}
         </ul>

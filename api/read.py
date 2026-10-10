@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from . import discord_api, limits, queries
-from .auth import require_guild_read
+from .auth import require_guild_admin, require_guild_read
 
 router = APIRouter(
     prefix="/api/guild/{guildId}",
@@ -178,7 +178,7 @@ async def member_state(request: Request, guildId: str, userId: str) -> dict:
     user = _snowflake(userId, "userId")
     from . import discord_api
 
-    cfg = request.app.state.config
+    cfg = request.app.state.config.for_guild(guildId)
     try:
         member = await discord_api.get_member(cfg, guild, user)
     except discord_api.DiscordError:
@@ -208,7 +208,7 @@ async def user_card(request: Request, guildId: str, userId: str) -> dict:
     user = _snowflake(userId, "userId")
     from . import discord_api
 
-    cfg = request.app.state.config
+    cfg = request.app.state.config.for_guild(guildId)
     db = _db(request)
     member = None
     if cfg.discord_token:
@@ -365,7 +365,7 @@ def audit_discord_status(request: Request, guildId: str) -> dict:
     return {"guildId": guild, **audit_sync.status_snapshot(_db(request), guild)}
 
 
-@router.post("/audit/discord/sync", dependencies=[Depends(limits.gate("audit-sync"))])
+@router.post("/audit/discord/sync", dependencies=[Depends(require_guild_admin), Depends(limits.gate("audit-sync"))])
 async def audit_discord_sync(request: Request, guildId: str) -> dict:
     """Обновить локальную копию журнала Discord прямо сейчас. Read-only обращение к
     Discord + идемпотентный upsert — журнал операций (operations) не требуется.
@@ -373,7 +373,7 @@ async def audit_discord_sync(request: Request, guildId: str) -> dict:
     from . import audit_sync
 
     guild = _snowflake(guildId, "guildId")
-    cfg = request.app.state.config
+    cfg = request.app.state.config.for_guild(guildId)
     if not cfg.discord_token:
         raise HTTPException(status_code=503, detail="bot token not configured")
     result = await audit_sync.sync_guild(_db(request), cfg, guild,
@@ -452,7 +452,7 @@ async def guild_picker(request: Request, guildId: str) -> dict:
     guild = _snowflake(guildId, "guildId")
     from . import discord_api
 
-    cfg = request.app.state.config
+    cfg = request.app.state.config.for_guild(guildId)
     try:
         role_rows = await discord_api.guild_roles_raw(cfg, guild)
         channel_rows = await discord_api.guild_channels_raw(cfg, guild)
@@ -474,7 +474,7 @@ async def guild_names(request: Request, guildId: str) -> dict:
     guild = _snowflake(guildId, "guildId")
     from . import discord_api
 
-    cfg = request.app.state.config
+    cfg = request.app.state.config.for_guild(guildId)
     channels: dict[str, str] = {}
     roles: dict[str, str] = {}
     guild_name = None

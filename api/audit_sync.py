@@ -382,7 +382,8 @@ async def run_loop(app: Any, on_cycle: Any = None) -> None:
             if db is None or cfg is None or not cfg.discord_token:
                 continue
             for guild in await asyncio.to_thread(known_guilds, db):
-                await sync_guild(db, cfg, guild)
+                if cfg.guild_allowed(guild) and not cfg.guild_archived(guild):
+                    await sync_guild(db, cfg, guild)
         except asyncio.CancelledError:
             raise
         except Exception:
